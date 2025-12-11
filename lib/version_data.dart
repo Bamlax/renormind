@@ -13,6 +13,19 @@ class VersionItem {
 // 在这里维护版本记录
 const List<VersionItem> appVersionHistory = [
   VersionItem(
+    version: "v0.2.0",
+    date: "2025-12-11",
+    changes: [
+      "新增预约可以提前开始，计时可以取消的功能",
+      "新增app图标",
+      "修改了版本号说明",
+      "修改CTDP界面任务编号",
+      "修正CTDP未完成任务后的继续逻辑",
+      "修复神圣座位和预约内容无法保存的问题",
+      "优化联系开发者的界面ui",
+    ],
+  ),
+  VersionItem(
     version: "v0.1.0",
     date: "2025-12-11",
     changes: [

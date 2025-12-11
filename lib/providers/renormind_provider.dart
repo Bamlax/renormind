@@ -21,6 +21,8 @@ class RenormindProvider extends ChangeNotifier {
   String? _sacredTaskId; 
   DateTime? _sessionStartTime; 
   bool _isSessionRunning = false; 
+  
+  bool _isDataLoaded = false;
 
   RenormindProvider() {
     _loadFromStorage();
@@ -38,6 +40,7 @@ class RenormindProvider extends ChangeNotifier {
   bool get isSessionRunning => _isSessionRunning;
   DateTime? get sessionStartTime => _sessionStartTime;
   String? get sacredTaskId => _sacredTaskId;
+  bool get isDataLoaded => _isDataLoaded;
 
   CtdpTask? get selectedTask {
     if (_selectedTaskId == null) return null;
@@ -64,7 +67,6 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 普通跳转（带预约）
   void jumpToSacredSeat(CtdpTask task) {
     if (_isSessionRunning) {
       _currentTabIndex = 1; 
@@ -72,8 +74,6 @@ class RenormindProvider extends ChangeNotifier {
       return;
     }
     _sacredTaskId = task.id;
-    // 如果任务有计划时长，默认给个5分钟准备时间，也可以设为0
-    // 这里设为5分钟用于演示预约功能
     _reserveDurationMinutes = 5; 
     
     _currentTabIndex = 1; 
@@ -81,7 +81,6 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- 直接开始任务（跳过预约） ---
   void startDirectTaskSession(CtdpTask task) {
     if (_isSessionRunning) {
       _currentTabIndex = 1;
@@ -89,17 +88,10 @@ class RenormindProvider extends ChangeNotifier {
       return;
     }
 
-    // 1. 绑定任务
     _sacredTaskId = task.id;
-    
-    // 2. 将预约时长设为 0，意味着立即进入任务阶段
     _reserveDurationMinutes = 0;
-
-    // 3. 立即开始
     _sessionStartTime = DateTime.now();
     _isSessionRunning = true;
-    
-    // 4. 跳转页面
     _currentTabIndex = 1;
 
     _saveSeatData();
@@ -112,8 +104,7 @@ class RenormindProvider extends ChangeNotifier {
     _seatContent = seat;
     _reserveContent = reserve;
     _reserveDurationMinutes = duration;
-    _saveSeatData();
-    notifyListeners();
+    _saveSeatData(); 
   }
 
   void setSacredTask(String? taskId) {
@@ -131,15 +122,25 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 新增：跳过预约，直接开始任务
+  void skipReservation() {
+    if (!_isSessionRunning) return;
+    
+    // 原理：将预约时长设为0，并将开始时间重置为现在
+    // 这样 UI 逻辑会判断 now >= start + 0，从而进入任务阶段
+    _reserveDurationMinutes = 0;
+    _sessionStartTime = DateTime.now();
+    
+    _saveSeatData();
+    notifyListeners();
+  }
+
   void finishSacredSession() {
     if (_sessionStartTime != null && _sacredTaskId != null) {
-      // 预约结束的时间点 = 任务开始的时间点
       DateTime taskStartTime = _sessionStartTime!.add(Duration(minutes: _reserveDurationMinutes));
       DateTime now = DateTime.now();
 
       int taskDurationSeconds = 0;
-      
-      // 只有当前时间超过了预约时间，才算作任务时间
       if (now.isAfter(taskStartTime)) {
         taskDurationSeconds = now.difference(taskStartTime).inSeconds;
       }
@@ -153,6 +154,7 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 停止（取消），不保存时间
   void stopSacredSession() {
     _sessionStartTime = null;
     _isSessionRunning = false;
@@ -349,6 +351,7 @@ class RenormindProvider extends ChangeNotifier {
       _isSessionRunning = true;
     }
 
+    _isDataLoaded = true;
     notifyListeners();
   }
 
@@ -387,8 +390,14 @@ class RenormindProvider extends ChangeNotifier {
     var roots = _rawTasks.where((t) => t.parentId == null).toList();
     roots.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     
+    int counter = 0;
     for (int i = 0; i < roots.length; i++) {
-      _processCtdpNode(roots[i], "${i + 1}", maxLevel, result);
+      counter++;
+      String indexStr = "$counter";
+      _processCtdpNode(roots[i], indexStr, maxLevel, result);
+      if (roots[i].isFailed) {
+        counter = 0;
+      }
     }
     _displayTasks = result;
   }
@@ -403,9 +412,14 @@ class RenormindProvider extends ChangeNotifier {
     var children = _rawTasks.where((t) => t.parentId == node.id).toList();
     children.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     
+    int childCounter = 0;
     for (int i = 0; i < children.length; i++) {
-      String childIndex = "$localIndex.${i + 1}";
-      _processCtdpNode(children[i], childIndex, globalMaxLevel, result);
+      childCounter++;
+      String childIndexStr = "$childCounter"; 
+      _processCtdpNode(children[i], childIndexStr, globalMaxLevel, result);
+      if (children[i].isFailed) {
+        childCounter = 0;
+      }
     }
   }
 }

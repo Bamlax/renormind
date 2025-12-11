@@ -23,19 +23,32 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
   Color _timerColor = Colors.blueAccent;
   bool _isTaskPhase = false; 
 
+  bool _hasSyncedInitialData = false;
+
   @override
   void initState() {
     super.initState();
-    final provider = context.read<RenormindProvider>();
-    _seatController = TextEditingController(text: provider.seatContent);
-    _reserveController = TextEditingController(text: provider.reserveContent);
-    _durationController = TextEditingController(
-        text: provider.reserveDurationMinutes == 0 ? "" : provider.reserveDurationMinutes.toString());
+    _seatController = TextEditingController();
+    _reserveController = TextEditingController();
+    _durationController = TextEditingController();
 
     _ticker = Timer.periodic(const Duration(seconds: 1), (timer) {
       _updateTimerLogic();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateTimerLogic());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final provider = context.watch<RenormindProvider>();
+    
+    if (provider.isDataLoaded && !_hasSyncedInitialData) {
+      _seatController.text = provider.seatContent;
+      _reserveController.text = provider.reserveContent;
+      _durationController.text = provider.reserveDurationMinutes == 0 ? "" : provider.reserveDurationMinutes.toString();
+      _hasSyncedInitialData = true; 
+    }
   }
 
   @override
@@ -66,11 +79,9 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
     final now = DateTime.now();
     final startTime = provider.sessionStartTime!;
     final reserveDuration = Duration(minutes: provider.reserveDurationMinutes);
-    // 预约结束时间点 = 任务开始时间点
     final taskStartTime = startTime.add(reserveDuration);
 
     if (now.isBefore(taskStartTime)) {
-      // --- 阶段一：预约倒计时 ---
       final remaining = taskStartTime.difference(now).inSeconds;
       if (mounted) {
         setState(() {
@@ -81,18 +92,15 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
         });
       }
     } else {
-      // --- 阶段二：任务阶段 ---
       final elapsed = now.difference(taskStartTime).inSeconds;
       _isTaskPhase = true;
       
-      // 判断显示模式：倒计时 vs 正计时
       int plannedSeconds = 0;
       if (sacredTask != null && sacredTask.plannedMinutes > 0) {
         plannedSeconds = sacredTask.plannedMinutes * 60;
       }
 
       if (plannedSeconds > 0) {
-        // [有计划时间] -> 倒计时模式
         final remainingTaskTime = plannedSeconds - elapsed;
         bool isOvertime = remainingTaskTime < 0;
         int showSeconds = isOvertime ? -remainingTaskTime : remainingTaskTime;
@@ -105,7 +113,6 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
           });
         }
       } else {
-        // [无计划时间] -> 正计时模式
         if (mounted) {
           setState(() {
             _timerLabel = "任务进行中 (正计时)";
@@ -302,42 +309,78 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
 
               const SizedBox(height: 20),
               
-              SizedBox(
-                height: 50,
-                child: isRunning 
-                  ? FilledButton.icon(
-                      onPressed: () {
-                        if (_isTaskPhase) {
-                           provider.finishSacredSession();
-                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("任务完成，时长已记录")));
-                        } else {
-                           provider.stopSacredSession();
-                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("预约已取消")));
-                        }
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _isTaskPhase ? Colors.green : Colors.redAccent,
+              if (isRunning) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      // 主操作按钮
+                      child: SizedBox(
+                        height: 50,
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            if (_isTaskPhase) {
+                              provider.finishSacredSession();
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("任务完成")));
+                            } else {
+                              provider.skipReservation();
+                            }
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _isTaskPhase ? Colors.green : Colors.blue,
+                          ),
+                          icon: Icon(_isTaskPhase ? Icons.check : Icons.fast_forward),
+                          label: Text(
+                            _isTaskPhase ? "完成任务" : "提前开始", 
+                            style: const TextStyle(fontSize: 18)
+                          ),
+                        ),
                       ),
-                      icon: Icon(_isTaskPhase ? Icons.check : Icons.stop),
-                      label: Text(_isTaskPhase ? "完成任务 (记录时间)" : "取消预约", style: const TextStyle(fontSize: 18)),
-                    )
-                  : FilledButton.icon(
-                      onPressed: () {
-                        _saveData(provider);
-                        if (provider.reserveDurationMinutes <= 0) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请输入预约时长")));
-                          return;
-                        }
-                        if (provider.sacredTaskId == null) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先选择一个任务")));
-                          return;
-                        }
-                        provider.startSacredSession();
-                      },
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text("开始预约", style: TextStyle(fontSize: 18)),
                     ),
-              ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      // 次要操作按钮 (灰色取消)
+                      child: SizedBox(
+                        height: 50,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            provider.stopSacredSession();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已取消")));
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.grey, 
+                            side: const BorderSide(color: Colors.grey), 
+                          ),
+                          icon: const Icon(Icons.close),
+                          label: Text(
+                            _isTaskPhase ? "取消" : "取消预约", 
+                            style: const TextStyle(fontSize: 18)
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                SizedBox(
+                  height: 50,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      _saveData(provider);
+                      if (provider.reserveDurationMinutes <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请输入预约时长")));
+                        return;
+                      }
+                      if (provider.sacredTaskId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先选择一个任务")));
+                        return;
+                      }
+                      provider.startSacredSession();
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text("开始预约", style: TextStyle(fontSize: 18)),
+                  ),
+                ),
+              ]
             ],
           ),
         ),

@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 依然保留，万一用户长按复制
-import 'package:url_launcher/url_launcher.dart'; // 引入跳转插件
+import 'package:flutter/services.dart'; 
+import 'package:url_launcher/url_launcher.dart'; 
 import '../version_data.dart'; 
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  // --- 新增：核心跳转逻辑 ---
   Future<void> _launchUrl(BuildContext context, String urlString) async {
     final Uri url = Uri.parse(urlString);
     try {
@@ -14,7 +13,6 @@ class SettingsScreen extends StatelessWidget {
         throw Exception('无法打开链接');
       }
     } catch (e) {
-      // 如果跳转失败（比如没有浏览器或邮件客户端），则回退到复制到剪贴板
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("无法打开应用，已将内容复制到剪贴板")),
@@ -28,41 +26,51 @@ class SettingsScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
           children: [
-            Icon(Icons.code, color: Colors.blue),
-            SizedBox(width: 8),
-            Text("联系开发者"),
+            Icon(Icons.code_rounded, color: Colors.blueAccent),
+            SizedBox(width: 12),
+            Text("联系开发者", style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("如果您有任何建议或发现Bug，欢迎联系："),
-            const SizedBox(height: 20),
-            // GitHub 跳转
-            _buildContactItem(
-              ctx, 
-              "GitHub", 
-              "https://github.com/Bamlax", 
-              Icons.link,
-              isUrl: true
+            Text(
+              "如果您有任何建议或发现Bug，欢迎通过以下方式联系：",
+              style: TextStyle(color: Colors.grey[700], fontSize: 14),
             ),
-            const SizedBox(height: 10),
-            // 邮箱跳转 (使用 mailto: 协议)
-            _buildContactItem(
+            const SizedBox(height: 20),
+            
+            // GitHub 卡片
+            _buildContactCard(
               ctx, 
-              "Email", 
-              "mailto:bamlax@163.com", 
-              Icons.email,
-              displayText: "bamlax@163.com" // 显示时不显示 mailto: 前缀
+              title: "GitHub", 
+              content: "github.com/Bamlax", 
+              url: "https://github.com/Bamlax",
+              icon: Icons.code, // 也可以换成 FontAwesome 图标如果引入了包
+              color: Colors.black87
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // 邮箱 卡片
+            _buildContactCard(
+              ctx, 
+              title: "Email", 
+              content: "bamlax@163.com", 
+              url: "mailto:bamlax@163.com", 
+              icon: Icons.email_outlined,
+              color: Colors.blue
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey),
             child: const Text("关闭"),
           ),
         ],
@@ -70,46 +78,80 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildContactItem(
-    BuildContext context, 
-    String label, 
-    String content, 
-    IconData icon, 
-    {bool isUrl = false, String? displayText}
-  ) {
-    return InkWell(
-      onTap: () => _launchUrl(context, content),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-        decoration: BoxDecoration(
-          color: Colors.grey[100],
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: Colors.blue[700]),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  Text(
-                    displayText ?? content, 
-                    style: const TextStyle(
-                      fontSize: 15, 
-                      fontWeight: FontWeight.w500,
-                      color: Colors.blue, // 变成蓝色表示可点击
-                      decoration: TextDecoration.underline, // 加下划线
-                      decorationColor: Colors.blue,
-                    )
+  // --- 新设计的联系人卡片组件 ---
+  Widget _buildContactCard(
+    BuildContext context, {
+    required String title, 
+    required String content, 
+    required String url, 
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _launchUrl(context, url),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            child: Row(
+              children: [
+                // 左侧图标容器
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                ],
-              ),
+                  child: Icon(icon, size: 20, color: color),
+                ),
+                const SizedBox(width: 16),
+                
+                // 中间文字
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title, 
+                        style: TextStyle(
+                          fontSize: 12, 
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500
+                        )
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        content, 
+                        style: const TextStyle(
+                          fontSize: 15, 
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // 右侧箭头
+                Icon(Icons.arrow_outward_rounded, size: 18, color: Colors.grey[400]),
+              ],
             ),
-            const Icon(Icons.open_in_new, size: 16, color: Colors.grey), // 图标改成“打开”
-          ],
+          ),
         ),
       ),
     );
@@ -118,15 +160,17 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50], //稍微给一点背景色，突出列表
       body: ListView(
         children: [
           const SizedBox(height: 20),
           _buildSectionHeader("通用"),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text("关于 Renormind"),
-            subtitle: const Text("版本记录与更新日志"),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+          
+          _buildSettingsTile(
+            context,
+            icon: Icons.info_outline_rounded,
+            title: "关于 Renormind",
+            subtitle: "版本记录与更新日志",
             onTap: () {
               Navigator.push(
                 context,
@@ -134,19 +178,20 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.person_outline),
-            title: const Text("开发者"),
-            subtitle: const Text("Bamlax"),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+          
+          const Divider(height: 1, indent: 60), // 分割线
+          
+          _buildSettingsTile(
+            context,
+            icon: Icons.person_outline_rounded,
+            title: "开发者",
+            subtitle: "Bamlax",
             onTap: () => _showDeveloperDialog(context),
           ),
           
           const SizedBox(height: 40),
           Center(
             child: Text(
-              // 这里可以改成动态获取，或者手动维护
               "Renormind ${appVersionHistory.first.version}", 
               style: TextStyle(color: Colors.grey[400], fontSize: 12),
             ),
@@ -158,7 +203,7 @@ class SettingsScreen extends StatelessWidget {
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
       child: Text(
         title,
         style: TextStyle(
@@ -169,17 +214,58 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
   }
+  
+  // 封装通用的设置列表项，保持风格一致
+  Widget _buildSettingsTile(BuildContext context, {
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.grey[700], size: 24),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontSize: 16)),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+                    ]
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-// --- 版本记录详情页 (保持不变) ---
+// --- 版本记录详情页 (保持不变，稍微美化一下AppBar) ---
 class VersionHistoryPage extends StatelessWidget {
   const VersionHistoryPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text("版本记录"),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
       ),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
@@ -188,38 +274,49 @@ class VersionHistoryPage extends StatelessWidget {
           final item = appVersionHistory[index];
           return Card(
             margin: const EdgeInsets.only(bottom: 16),
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 0, // 扁平化风格
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.grey.withValues(alpha: 0.2))
+            ),
             child: Padding(
-              padding: const EdgeInsets.all(16.0),
+              padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        item.version,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue,
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(6)
+                        ),
+                        child: Text(
+                          item.version,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[800],
+                          ),
                         ),
                       ),
                       Text(
                         item.date,
-                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                        style: TextStyle(color: Colors.grey[500], fontSize: 13),
                       ),
                     ],
                   ),
-                  const Divider(height: 24),
+                  const SizedBox(height: 16),
                   ...item.changes.map((change) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("• ", style: TextStyle(fontWeight: FontWeight.bold)),
-                        Expanded(child: Text(change, style: const TextStyle(height: 1.4))),
+                        const Text("• ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                        Expanded(child: Text(change, style: const TextStyle(height: 1.5, color: Colors.black87))),
                       ],
                     ),
                   )),
