@@ -1,16 +1,34 @@
-# renormind
+# Renormind
 
-A new Flutter project.
+**Renormind** 是一款极简的深度专注与任务管理工具，帮助你建立仪式感，重塑心流状态。
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## ⚡️ 核心功能
 
-A few resources to get you started if this is your first Flutter project:
+1.  **CTDP 任务树**
+    *   支持无限层级子任务，结构清晰。
+    *   支持设定“计划时长”，自动计算偏差百分比。
+2.  **神圣座位 (Sacred Seat)**
+    *   独创的“预约 -> 专注”流程。
+    *   倒计时结束后自动切换为任务正计时，无缝衔接。
+3.  **后台保活**
+    *   无论杀后台还是重启手机，计时器都能瞬间恢复，分秒不差。
+4.  **完全离线**
+    *   所有数据存储在本地，无需联网，保护隐私。
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🚀 如何运行
+
+如果你安装了 Flutter 环境：
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/Bamlax/renormind.git
+
+# 2. 进入目录
+cd renormind
+
+# 3. 运行
+flutter run
