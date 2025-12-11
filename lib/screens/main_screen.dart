@@ -3,22 +3,26 @@ import 'package:provider/provider.dart';
 import '../providers/renormind_provider.dart';
 import '../task_model.dart';
 import 'ctdp_view.dart';
-import 'sacred_seat_page.dart'; // 引入新页面
+import 'sacred_seat_page.dart'; 
+import 'settings_screen.dart'; // 引入设置页面
 
-class MainScreen extends StatefulWidget {
+class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
 
-  @override
-  State<MainScreen> createState() => _MainScreenState();
-}
-
-class _MainScreenState extends State<MainScreen> {
-  int _currentIndex = 0;
-
-  final List<Widget> _pages = [
-    const CtdpView(),
-    const SacredSeatPage(), // 放在中间或者最后，看你需求，这里我放第二个
-    const Center(child: Text("设置 (开发中)")),
+  final List<Widget> _pages = const [
+    CtdpView(),           // Index 0
+    SacredSeatPage(),     // Index 1
+    Center(               // Index 2 (统计)
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.bar_chart, size: 80, color: Colors.grey),
+          SizedBox(height: 16),
+          Text("统计 (开发中)", style: TextStyle(fontSize: 24, color: Colors.grey)),
+        ],
+      )
+    ),
+    SettingsScreen(),     // Index 3 (替换了原来的占位符)
   ];
 
   // --- Actions ---
@@ -55,14 +59,16 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 监听 Provider 中的 tabIndex
     final provider = context.watch<RenormindProvider>();
+    final currentIndex = provider.currentTabIndex;
     final isSelected = provider.selectedTaskId != null;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Renormind'),
         actions: [
-          if (_currentIndex == 0 && isSelected) ...[
+          if (currentIndex == 0 && isSelected) ...[
              IconButton(
                icon: const Icon(Icons.delete_outline, color: Colors.red), 
                tooltip: "删除",
@@ -79,28 +85,30 @@ class _MainScreenState extends State<MainScreen> {
       ),
       body: GestureDetector(
         onTap: () {
-          if (_currentIndex == 0) provider.clearSelection();
+          if (currentIndex == 0) provider.clearSelection();
         },
-        child: IndexedStack( // 使用 IndexedStack 保持页面状态
-          index: _currentIndex,
+        child: IndexedStack( 
+          index: currentIndex,
           children: _pages,
         ),
       ),
-      floatingActionButton: (_currentIndex == 0) 
+      floatingActionButton: (currentIndex == 0) 
         ? FloatingActionButton(
             onPressed: () => _onFabCTDP(context, provider),
             child: Icon(isSelected ? Icons.subdirectory_arrow_right : Icons.add),
           ) 
         : null,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
+        selectedIndex: currentIndex,
         onDestinationSelected: (index) {
-          setState(() => _currentIndex = index);
-          provider.clearSelection();
+          // 调用 Provider 的方法来切换页面
+          provider.setTabIndex(index);
+          if (index != 0) provider.clearSelection();
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.list_alt), label: 'CTDP'),
-          NavigationDestination(icon: Icon(Icons.event_seat), label: '神圣座位'), // 新增
+          NavigationDestination(icon: Icon(Icons.event_seat), label: '神圣座位'),
+          NavigationDestination(icon: Icon(Icons.bar_chart), label: '统计'),
           NavigationDestination(icon: Icon(Icons.settings), label: '设置'),
         ],
       ),
@@ -108,7 +116,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// ... TaskDialog 代码保持不变 ...
+// ... TaskDialog 保持不变 ...
 class TaskDialog extends StatefulWidget { 
   final String title; 
   final CtdpTask? taskToEdit; 

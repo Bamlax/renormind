@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/renormind_provider.dart';
 import '../task_model.dart'; 
-import 'timer_screen.dart'; 
 
 class CtdpView extends StatefulWidget {
   const CtdpView({super.key});
@@ -57,6 +56,7 @@ class _CtdpViewState extends State<CtdpView> {
 
   Widget _buildTaskCard(BuildContext context, RenormindProvider provider, CtdpTask task) {
     final isSelected = task.id == provider.selectedTaskId;
+    final isSacred = task.id == provider.sacredTaskId; 
     final isFailed = task.isFailed;
     final isDone = task.isDone;
 
@@ -69,6 +69,11 @@ class _CtdpViewState extends State<CtdpView> {
     Color borderColor = isSelected 
         ? Theme.of(context).colorScheme.primary 
         : (isFailed ? Colors.red : Colors.transparent);
+    
+    if (isSacred && provider.isSessionRunning) {
+      borderColor = Colors.orange;
+      cardColor = Colors.orange.withValues(alpha: 0.05);
+    }
 
     double indent = 10 + (task.level - 1) * 20.0;
 
@@ -90,7 +95,7 @@ class _CtdpViewState extends State<CtdpView> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: borderColor,
-            width: isSelected ? 2.0 : 1.0,
+            width: isSelected || (isSacred && provider.isSessionRunning) ? 2.0 : 1.0,
           ),
           boxShadow: isSelected ? [
             BoxShadow(
@@ -111,7 +116,6 @@ class _CtdpViewState extends State<CtdpView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // 第一行：标题
                         Text(
                           "${task.displaySymbol} ${task.displayId} ${task.name}",
                           style: TextStyle(
@@ -121,15 +125,11 @@ class _CtdpViewState extends State<CtdpView> {
                             decoration: decoration,
                           ),
                         ),
-                        
-                        // 第二行：时间统计 (如果计划时长为0则不显示)
-                        if (task.plannedMinutes > 0)
+                        if (task.plannedMinutes > 0 || task.actualSeconds > 0)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
                             child: _buildTimeInfo(task),
                           ),
-
-                        // 第三行：描述
                         if (task.description.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
@@ -142,33 +142,39 @@ class _CtdpViewState extends State<CtdpView> {
                               ),
                             ),
                           ),
+                        if (isSacred && provider.isSessionRunning)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text(
+                              "🔥 正在神圣座位中进行...",
+                              style: TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.bold),
+                            ),
+                          )
                       ],
                     ),
                   ),
                   
                   // 右侧打卡按钮
                   InkWell(
-                    onTap: () async {
+                    onTap: () {
                       if (task.isDone || task.isFailed) {
-                        // 如果已经完成或失败，点击则反转状态
                         provider.toggleDone(task.id);
                       } else {
-                        // --- 修改点开始：判断是否需要倒计时 ---
+                        // --- 逻辑分支 ---
                         if (task.plannedMinutes > 0) {
-                          // 有计划时间 -> 跳转计时器
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => TimerScreen(task: task)),
-                          );
-                          
-                          if (result != null && result is int) {
-                            provider.completeTaskWithTime(task.id, result);
+                          // [有计划时间] -> 跳转并开始倒计时
+                          if (provider.isSessionRunning) {
+                             ScaffoldMessenger.of(context).showSnackBar(
+                               const SnackBar(content: Text("已有任务正在进行，请先完成或取消当前预约"))
+                             );
+                             provider.setTabIndex(1);
+                          } else {
+                             provider.startDirectTaskSession(task);
                           }
                         } else {
-                          // 无计划时间 -> 直接打卡成功
+                          // [无计划时间] -> 直接完成
                           provider.toggleDone(task.id);
                         }
-                        // --- 修改点结束 ---
                       }
                     },
                     onLongPress: () {
@@ -176,7 +182,7 @@ class _CtdpViewState extends State<CtdpView> {
                         context: context,
                         builder: (ctx) => AlertDialog(
                           title: const Text("标记为未完成？"),
-                          content: const Text("这将把此任务标记为失败（红色叉号），且不记录时间。"),
+                          content: const Text("这将把此任务标记为失败（红色叉号）。"),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(ctx),
@@ -223,30 +229,31 @@ class _CtdpViewState extends State<CtdpView> {
     );
   }
 
-  // 构建时间信息组件
   Widget _buildTimeInfo(CtdpTask task) {
-    String text = "计划: ${task.plannedMinutes}m";
+    String text = "";
     Color color = Colors.blueGrey;
 
-    if (task.isDone) {
+    if (task.plannedMinutes > 0) {
+      text = "计划: ${task.plannedMinutes}m";
+    }
+
+    if (task.actualSeconds > 0) {
       int actualMins = task.actualSeconds ~/ 60; 
       int actualSecs = task.actualSeconds % 60;  
       
       String percentStr = "";
-      
       if (task.plannedMinutes > 0) {
         int plannedSeconds = task.plannedMinutes * 60;
         double diff = (task.actualSeconds - plannedSeconds) / plannedSeconds * 100;
-        
         String sign = diff > 0 ? "+" : "";
         percentStr = " ($sign${diff.toStringAsFixed(2)}%)";
-        
         if (diff > 10) color = Colors.red;
         else if (diff < -10) color = Colors.green;
         else color = Colors.black87;
       }
-
-      text += " | 实际: ${actualMins}m ${actualSecs}s$percentStr";
+      
+      if (text.isNotEmpty) text += " | ";
+      text += "实际: ${actualMins}m ${actualSecs}s$percentStr";
     }
 
     return Text(

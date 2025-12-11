@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/renormind_provider.dart';
+import '../task_model.dart';
 
 class SacredSeatPage extends StatefulWidget {
   const SacredSeatPage({super.key});
@@ -14,9 +15,13 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
   late TextEditingController _seatController;
   late TextEditingController _reserveController;
   late TextEditingController _durationController;
+  
   Timer? _ticker;
+  
+  String _timerLabel = "准备开始";
   String _displayTime = "00:00:00";
-  bool _isOvertime = false;
+  Color _timerColor = Colors.blueAccent;
+  bool _isTaskPhase = false; 
 
   @override
   void initState() {
@@ -27,12 +32,10 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
     _durationController = TextEditingController(
         text: provider.reserveDurationMinutes == 0 ? "" : provider.reserveDurationMinutes.toString());
 
-    // 启动UI刷新定时器
     _ticker = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _updateTimerDisplay();
+      _updateTimerLogic();
     });
-    // 立即刷新一次
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateTimerDisplay());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateTimerLogic());
   }
 
   @override
@@ -44,32 +47,72 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
     super.dispose();
   }
 
-  // 核心逻辑：基于 Provider 保存的 StartTime 计算当前显示
-  void _updateTimerDisplay() {
+  void _updateTimerLogic() {
     final provider = context.read<RenormindProvider>();
-    if (!provider.isSeatTimerRunning || provider.seatStartTime == null) {
-      if (mounted) setState(() => _displayTime = "准备开始");
+    final sacredTask = provider.currentSacredTask;
+    
+    if (!provider.isSessionRunning || provider.sessionStartTime == null) {
+      if (mounted && _timerLabel != "准备开始") {
+        setState(() {
+          _timerLabel = "准备开始";
+          _displayTime = "00:00:00";
+          _timerColor = Colors.grey;
+          _isTaskPhase = false;
+        });
+      }
       return;
     }
 
     final now = DateTime.now();
-    final elapsedSeconds = now.difference(provider.seatStartTime!).inSeconds;
-    final totalSeconds = provider.seatTotalSeconds;
-    final remaining = totalSeconds - elapsedSeconds;
+    final startTime = provider.sessionStartTime!;
+    final reserveDuration = Duration(minutes: provider.reserveDurationMinutes);
+    // 预约结束时间点 = 任务开始时间点
+    final taskStartTime = startTime.add(reserveDuration);
 
-    bool overtime = remaining < 0;
-    int showSeconds = overtime ? -remaining : remaining;
-
-    String formatted = _formatTime(showSeconds);
-    if (mounted) {
-      setState(() {
-        _isOvertime = overtime;
-        _displayTime = (overtime ? "+" : "") + formatted;
-      });
+    if (now.isBefore(taskStartTime)) {
+      // --- 阶段一：预约倒计时 ---
+      final remaining = taskStartTime.difference(now).inSeconds;
+      if (mounted) {
+        setState(() {
+          _timerLabel = "预约倒计时";
+          _displayTime = _formatTime(remaining);
+          _timerColor = Colors.blueAccent;
+          _isTaskPhase = false;
+        });
+      }
+    } else {
+      // --- 阶段二：任务阶段 ---
+      final elapsed = now.difference(taskStartTime).inSeconds;
+      _isTaskPhase = true;
       
-      // 简单提醒：如果刚好超时0秒 (实际可能跳过，这里做个简单视觉反馈，生产环境用LocalNotification)
-      if (remaining == 0 || remaining == -1) {
-         // 可以加入震动或声音
+      // 判断显示模式：倒计时 vs 正计时
+      int plannedSeconds = 0;
+      if (sacredTask != null && sacredTask.plannedMinutes > 0) {
+        plannedSeconds = sacredTask.plannedMinutes * 60;
+      }
+
+      if (plannedSeconds > 0) {
+        // [有计划时间] -> 倒计时模式
+        final remainingTaskTime = plannedSeconds - elapsed;
+        bool isOvertime = remainingTaskTime < 0;
+        int showSeconds = isOvertime ? -remainingTaskTime : remainingTaskTime;
+        
+        if (mounted) {
+          setState(() {
+            _timerLabel = isOvertime ? "任务超时 (正计时)" : "任务倒计时";
+            _displayTime = (isOvertime ? "+" : "") + _formatTime(showSeconds);
+            _timerColor = isOvertime ? Colors.red : Colors.blueAccent;
+          });
+        }
+      } else {
+        // [无计划时间] -> 正计时模式
+        if (mounted) {
+          setState(() {
+            _timerLabel = "任务进行中 (正计时)";
+            _displayTime = "+${_formatTime(elapsed)}";
+            _timerColor = Colors.green;
+          });
+        }
       }
     }
   }
@@ -86,10 +129,45 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
     provider.updateSeatData(_seatController.text, _reserveController.text, duration);
   }
 
+  void _showTaskSelector(BuildContext context, RenormindProvider provider) {
+    if (provider.isSessionRunning) return; 
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return ListView(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text("选择当前要攻克的任务", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            ...provider.tasks.where((t) => !t.isDone).map((task) { 
+              return ListTile(
+                title: Text("${task.displaySymbol} ${task.name}"),
+                subtitle: Text("计划: ${task.plannedMinutes}m | 已耗时: ${task.actualSeconds}s"),
+                onTap: () {
+                  provider.setSacredTask(task.id);
+                  Navigator.pop(ctx);
+                },
+                trailing: provider.sacredTaskId == task.id ? const Icon(Icons.check, color: Colors.blue) : null,
+              );
+            }),
+            if (provider.tasks.where((t) => !t.isDone).isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text("暂无未完成任务，请去CTDP添加", textAlign: TextAlign.center),
+              )
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<RenormindProvider>();
-    final isRunning = provider.isSeatTimerRunning;
+    final isRunning = provider.isSessionRunning;
+    final sacredTask = provider.currentSacredTask;
 
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
@@ -100,7 +178,6 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 10),
-              // 神圣座位输入
               Card(
                 elevation: 2,
                 child: Padding(
@@ -124,7 +201,6 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
               ),
               const SizedBox(height: 20),
               
-              // 预约设置
               Card(
                 elevation: 2,
                 child: Padding(
@@ -158,10 +234,9 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
                           IconButton(
                             icon: const Icon(Icons.access_time),
                             onPressed: () async {
-                              // 简单的 TimePicker 模拟，让用户选择分钟
                               final TimeOfDay? time = await showTimePicker(
                                 context: context,
-                                initialTime: const TimeOfDay(hour: 0, minute: 30),
+                                initialTime: const TimeOfDay(hour: 0, minute: 5),
                                 helpText: "选择时长 (小时:分钟)",
                               );
                               if (time != null) {
@@ -177,59 +252,91 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 20),
 
-              // 倒计时显示
-              if (isRunning) ...[
-                 Center(
-                   child: Text(
-                     _isOvertime ? "已超时" : "倒计时中",
-                     style: TextStyle(
-                       color: _isOvertime ? Colors.red : Colors.green,
-                       fontSize: 20,
-                       fontWeight: FontWeight.bold
-                     ),
-                   ),
-                 ),
-                 Center(
-                   child: Text(
-                     _displayTime,
-                     style: TextStyle(
-                       fontSize: 60,
-                       fontWeight: FontWeight.bold,
-                       color: _isOvertime ? Colors.red : Colors.blueAccent,
-                       fontFeatures: const [FontFeature.tabularFigures()],
-                     ),
-                   ),
-                 ),
-              ],
+              Card(
+                elevation: isRunning ? 4 : 2,
+                color: isRunning ? Colors.blue.withValues(alpha: 0.1) : null,
+                shape: RoundedRectangleBorder(
+                  side: BorderSide(color: isRunning ? Colors.blue : Colors.transparent, width: 2),
+                  borderRadius: BorderRadius.circular(12)
+                ),
+                child: ListTile(
+                  title: const Text("当前目标任务"),
+                  subtitle: Text(
+                    sacredTask != null ? "${sacredTask.displaySymbol} ${sacredTask.name}" : "点击选择任务...",
+                    style: TextStyle(
+                      fontSize: 16, 
+                      fontWeight: FontWeight.bold,
+                      color: sacredTask != null ? Colors.black87 : Colors.grey
+                    ),
+                  ),
+                  trailing: const Icon(Icons.arrow_drop_down),
+                  onTap: () => _showTaskSelector(context, provider),
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              Center(
+                child: Text(
+                  _timerLabel,
+                  style: TextStyle(
+                    color: _timerColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold
+                  ),
+                ),
+              ),
+              Center(
+                child: Text(
+                  _displayTime,
+                  style: TextStyle(
+                    fontSize: 60,
+                    fontWeight: FontWeight.bold,
+                    color: _timerColor,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
 
               const SizedBox(height: 20),
               
-              // 按钮
               SizedBox(
                 height: 50,
-                child: FilledButton.icon(
-                  onPressed: () {
-                    if (isRunning) {
-                      // 停止
-                      provider.stopSeatTimer();
-                    } else {
-                      // 开始
-                      _saveData(provider); // 再次保存确保最新
-                      if (provider.reserveDurationMinutes <= 0) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请输入有效的时长")));
-                        return;
-                      }
-                      provider.startSeatTimer();
-                    }
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: isRunning ? Colors.red : Colors.blue,
-                  ),
-                  icon: Icon(isRunning ? Icons.stop : Icons.play_arrow),
-                  label: Text(isRunning ? "结束预约" : "开始预约", style: const TextStyle(fontSize: 18)),
-                ),
+                child: isRunning 
+                  ? FilledButton.icon(
+                      onPressed: () {
+                        if (_isTaskPhase) {
+                           provider.finishSacredSession();
+                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("任务完成，时长已记录")));
+                        } else {
+                           provider.stopSacredSession();
+                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("预约已取消")));
+                        }
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _isTaskPhase ? Colors.green : Colors.redAccent,
+                      ),
+                      icon: Icon(_isTaskPhase ? Icons.check : Icons.stop),
+                      label: Text(_isTaskPhase ? "完成任务 (记录时间)" : "取消预约", style: const TextStyle(fontSize: 18)),
+                    )
+                  : FilledButton.icon(
+                      onPressed: () {
+                        _saveData(provider);
+                        if (provider.reserveDurationMinutes <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请输入预约时长")));
+                          return;
+                        }
+                        if (provider.sacredTaskId == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("请先选择一个任务")));
+                          return;
+                        }
+                        provider.startSacredSession();
+                      },
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text("开始预约", style: TextStyle(fontSize: 18)),
+                    ),
               ),
             ],
           ),

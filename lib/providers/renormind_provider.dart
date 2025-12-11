@@ -9,19 +9,18 @@ class RenormindProvider extends ChangeNotifier {
   List<CtdpTask> _displayTasks = [];
   String? _selectedTaskId;
 
-  // --- 神圣座位数据 ---
+  // --- 页面导航控制 ---
+  int _currentTabIndex = 0; 
+
+  // --- 神圣座位 & 任务联动数据 ---
   String _seatContent = "";
   String _reserveContent = "";
   int _reserveDurationMinutes = 0;
   
-  // 神圣座位计时状态
-  DateTime? _seatStartTime;
-  int _seatTotalSeconds = 0;
-  bool _isSeatTimerRunning = false;
-
-  // 任务计时状态 (用于恢复 Task Timer)
-  String? _runningTaskId;
-  DateTime? _taskStartTime;
+  // 核心状态控制
+  String? _sacredTaskId; 
+  DateTime? _sessionStartTime; 
+  bool _isSessionRunning = false; 
 
   RenormindProvider() {
     _loadFromStorage();
@@ -30,17 +29,15 @@ class RenormindProvider extends ChangeNotifier {
   // Getters
   List<CtdpTask> get tasks => _displayTasks;
   String? get selectedTaskId => _selectedTaskId;
+  int get currentTabIndex => _currentTabIndex; 
   
   String get seatContent => _seatContent;
   String get reserveContent => _reserveContent;
   int get reserveDurationMinutes => _reserveDurationMinutes;
-  bool get isSeatTimerRunning => _isSeatTimerRunning;
-  DateTime? get seatStartTime => _seatStartTime;
-  int get seatTotalSeconds => _seatTotalSeconds;
-
-  // 获取当前正在后台运行的任务ID（如果有）
-  String? get runningTaskId => _runningTaskId;
-  DateTime? get taskStartTime => _taskStartTime;
+  
+  bool get isSessionRunning => _isSessionRunning;
+  DateTime? get sessionStartTime => _sessionStartTime;
+  String? get sacredTaskId => _sacredTaskId;
 
   CtdpTask? get selectedTask {
     if (_selectedTaskId == null) return null;
@@ -49,6 +46,64 @@ class RenormindProvider extends ChangeNotifier {
     } catch (e) {
       return null;
     }
+  }
+
+  CtdpTask? get currentSacredTask {
+    if (_sacredTaskId == null) return null;
+    try {
+      return _rawTasks.firstWhere((t) => t.id == _sacredTaskId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // --- 页面导航逻辑 ---
+  
+  void setTabIndex(int index) {
+    _currentTabIndex = index;
+    notifyListeners();
+  }
+
+  // 普通跳转（带预约）
+  void jumpToSacredSeat(CtdpTask task) {
+    if (_isSessionRunning) {
+      _currentTabIndex = 1; 
+      notifyListeners();
+      return;
+    }
+    _sacredTaskId = task.id;
+    // 如果任务有计划时长，默认给个5分钟准备时间，也可以设为0
+    // 这里设为5分钟用于演示预约功能
+    _reserveDurationMinutes = 5; 
+    
+    _currentTabIndex = 1; 
+    _saveSeatData();
+    notifyListeners();
+  }
+
+  // --- 直接开始任务（跳过预约） ---
+  void startDirectTaskSession(CtdpTask task) {
+    if (_isSessionRunning) {
+      _currentTabIndex = 1;
+      notifyListeners();
+      return;
+    }
+
+    // 1. 绑定任务
+    _sacredTaskId = task.id;
+    
+    // 2. 将预约时长设为 0，意味着立即进入任务阶段
+    _reserveDurationMinutes = 0;
+
+    // 3. 立即开始
+    _sessionStartTime = DateTime.now();
+    _isSessionRunning = true;
+    
+    // 4. 跳转页面
+    _currentTabIndex = 1;
+
+    _saveSeatData();
+    notifyListeners();
   }
 
   // --- 神圣座位逻辑 ---
@@ -61,33 +116,48 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void startSeatTimer() {
-    _seatStartTime = DateTime.now();
-    _seatTotalSeconds = _reserveDurationMinutes * 60;
-    _isSeatTimerRunning = true;
+  void setSacredTask(String? taskId) {
+    if (_isSessionRunning) return; 
+    _sacredTaskId = taskId;
     _saveSeatData();
     notifyListeners();
   }
 
-  void stopSeatTimer() {
-    _seatStartTime = null;
-    _isSeatTimerRunning = false;
+  void startSacredSession() {
+    if (_sacredTaskId == null) return;
+    _sessionStartTime = DateTime.now();
+    _isSessionRunning = true;
     _saveSeatData();
     notifyListeners();
   }
 
-  // --- 任务计时器持久化逻辑 ---
+  void finishSacredSession() {
+    if (_sessionStartTime != null && _sacredTaskId != null) {
+      // 预约结束的时间点 = 任务开始的时间点
+      DateTime taskStartTime = _sessionStartTime!.add(Duration(minutes: _reserveDurationMinutes));
+      DateTime now = DateTime.now();
 
-  void setTaskTimerRunning(String taskId) {
-    _runningTaskId = taskId;
-    _taskStartTime = DateTime.now(); // 记录开始时间
-    _saveTaskTimerState();
+      int taskDurationSeconds = 0;
+      
+      // 只有当前时间超过了预约时间，才算作任务时间
+      if (now.isAfter(taskStartTime)) {
+        taskDurationSeconds = now.difference(taskStartTime).inSeconds;
+      }
+      
+      completeTaskWithTime(_sacredTaskId!, taskDurationSeconds);
+    }
+
+    _sessionStartTime = null;
+    _isSessionRunning = false;
+    _saveSeatData();
+    notifyListeners();
   }
 
-  void clearTaskTimerRunning() {
-    _runningTaskId = null;
-    _taskStartTime = null;
-    _saveTaskTimerState();
+  void stopSacredSession() {
+    _sessionStartTime = null;
+    _isSessionRunning = false;
+    _saveSeatData();
+    notifyListeners();
   }
 
   // --- 任务 CRUD ---
@@ -104,7 +174,7 @@ class RenormindProvider extends ChangeNotifier {
 
   void addTask({
     required String name,
-    required int plannedMinutes,
+    required int plannedMinutes, 
     String description = '',
   }) {
     final parent = selectedTask;
@@ -154,7 +224,7 @@ class RenormindProvider extends ChangeNotifier {
     }
   }
 
-  void completeTaskWithTime(String id, int usedSeconds) {
+  void completeTaskWithTime(String id, int newSeconds) {
     final index = _rawTasks.indexWhere((t) => t.id == id);
     if (index != -1) {
       final old = _rawTasks[index];
@@ -168,7 +238,7 @@ class RenormindProvider extends ChangeNotifier {
         plannedMinutes: old.plannedMinutes,
         isDone: true,
         isFailed: false,
-        actualSeconds: usedSeconds,
+        actualSeconds: old.actualSeconds + newSeconds, 
       );
       
       _recalculateCtdpTree();
@@ -191,6 +261,11 @@ class RenormindProvider extends ChangeNotifier {
     findChildren(id);
 
     _rawTasks.removeWhere((t) => idsToDelete.contains(t.id));
+    
+    if (_sacredTaskId != null && idsToDelete.contains(_sacredTaskId)) {
+      _sacredTaskId = null;
+      if (_isSessionRunning) stopSacredSession();
+    }
 
     if (_selectedTaskId != null && idsToDelete.contains(_selectedTaskId)) {
       _selectedTaskId = null;
@@ -251,12 +326,11 @@ class RenormindProvider extends ChangeNotifier {
     }
   }
 
-  // --- 持久化底层 ---
+  // --- 持久化 ---
 
   Future<void> _loadFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 1. Load Tasks
     final String? tasksJson = prefs.getString('ctdp_tasks');
     if (tasksJson != null) {
       final List<dynamic> decodedList = jsonDecode(tasksJson);
@@ -264,24 +338,15 @@ class RenormindProvider extends ChangeNotifier {
       _recalculateCtdpTree(); 
     }
 
-    // 2. Load Seat Data
     _seatContent = prefs.getString('seat_content') ?? "";
     _reserveContent = prefs.getString('reserve_content') ?? "";
     _reserveDurationMinutes = prefs.getInt('reserve_duration') ?? 0;
+    _sacredTaskId = prefs.getString('sacred_task_id');
     
-    // 3. Load Seat Timer State
-    String? seatStartIso = prefs.getString('seat_start_time');
-    if (seatStartIso != null && seatStartIso.isNotEmpty) {
-      _seatStartTime = DateTime.parse(seatStartIso);
-      _seatTotalSeconds = (prefs.getInt('seat_total_seconds') ?? 0);
-      _isSeatTimerRunning = true;
-    }
-
-    // 4. Load Task Timer State
-    _runningTaskId = prefs.getString('running_task_id');
-    String? taskStartIso = prefs.getString('running_task_start_time');
-    if (taskStartIso != null) {
-      _taskStartTime = DateTime.parse(taskStartIso);
+    String? sessionStartIso = prefs.getString('session_start_time');
+    if (sessionStartIso != null && sessionStartIso.isNotEmpty) {
+      _sessionStartTime = DateTime.parse(sessionStartIso);
+      _isSessionRunning = true;
     }
 
     notifyListeners();
@@ -299,23 +364,16 @@ class RenormindProvider extends ChangeNotifier {
     await prefs.setString('reserve_content', _reserveContent);
     await prefs.setInt('reserve_duration', _reserveDurationMinutes);
     
-    if (_seatStartTime != null) {
-      await prefs.setString('seat_start_time', _seatStartTime!.toIso8601String());
-      await prefs.setInt('seat_total_seconds', _seatTotalSeconds);
+    if (_sacredTaskId != null) {
+      await prefs.setString('sacred_task_id', _sacredTaskId!);
     } else {
-      await prefs.remove('seat_start_time');
-      await prefs.remove('seat_total_seconds');
+      await prefs.remove('sacred_task_id');
     }
-  }
-
-  Future<void> _saveTaskTimerState() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (_runningTaskId != null && _taskStartTime != null) {
-      await prefs.setString('running_task_id', _runningTaskId!);
-      await prefs.setString('running_task_start_time', _taskStartTime!.toIso8601String());
+    
+    if (_sessionStartTime != null && _isSessionRunning) {
+      await prefs.setString('session_start_time', _sessionStartTime!.toIso8601String());
     } else {
-      await prefs.remove('running_task_id');
-      await prefs.remove('running_task_start_time');
+      await prefs.remove('session_start_time');
     }
   }
 
