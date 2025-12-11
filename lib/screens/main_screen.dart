@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/renormind_provider.dart';
+import '../task_model.dart';
 import 'ctdp_view.dart';
+import 'sacred_seat_page.dart'; // 引入新页面
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,6 +17,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _pages = [
     const CtdpView(),
+    const SacredSeatPage(), // 放在中间或者最后，看你需求，这里我放第二个
     const Center(child: Text("设置 (开发中)")),
   ];
 
@@ -78,7 +81,10 @@ class _MainScreenState extends State<MainScreen> {
         onTap: () {
           if (_currentIndex == 0) provider.clearSelection();
         },
-        child: _pages[_currentIndex],
+        child: IndexedStack( // 使用 IndexedStack 保持页面状态
+          index: _currentIndex,
+          children: _pages,
+        ),
       ),
       floatingActionButton: (_currentIndex == 0) 
         ? FloatingActionButton(
@@ -94,6 +100,7 @@ class _MainScreenState extends State<MainScreen> {
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.list_alt), label: 'CTDP'),
+          NavigationDestination(icon: Icon(Icons.event_seat), label: '神圣座位'), // 新增
           NavigationDestination(icon: Icon(Icons.settings), label: '设置'),
         ],
       ),
@@ -101,7 +108,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// CTDP TaskDialog
+// ... TaskDialog 代码保持不变 ...
 class TaskDialog extends StatefulWidget { 
   final String title; 
   final CtdpTask? taskToEdit; 
@@ -112,8 +119,6 @@ class TaskDialog extends StatefulWidget {
 class _TaskDialogState extends State<TaskDialog> { 
   final _formKey = GlobalKey<FormState>(); 
   late final TextEditingController _nameController; 
-  late final TextEditingController _seatController; 
-  late final TextEditingController _signalController; 
   late final TextEditingController _durationController; 
   late final TextEditingController _descController; 
   
@@ -121,16 +126,16 @@ class _TaskDialogState extends State<TaskDialog> {
     super.initState(); 
     final t = widget.taskToEdit; 
     _nameController = TextEditingController(text: t?.name ?? ''); 
-    _seatController = TextEditingController(text: t?.sacredSeat ?? ''); 
-    _signalController = TextEditingController(text: t?.signal ?? ''); 
-    _durationController = TextEditingController(text: t?.duration ?? ''); 
+    String durationText = '';
+    if (t != null && t.plannedMinutes > 0) {
+      durationText = t.plannedMinutes.toString();
+    }
+    _durationController = TextEditingController(text: durationText); 
     _descController = TextEditingController(text: t?.description ?? ''); 
   } 
   
   @override void dispose() { 
     _nameController.dispose(); 
-    _seatController.dispose(); 
-    _signalController.dispose(); 
     _durationController.dispose(); 
     _descController.dispose(); 
     super.dispose(); 
@@ -145,15 +150,33 @@ class _TaskDialogState extends State<TaskDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min, 
           children: [
-            TextFormField(controller: _nameController, decoration: const InputDecoration(labelText: "任务名称"), validator: (v) => v!.isEmpty ? "必填" : null), 
+            TextFormField(
+              controller: _nameController, 
+              decoration: const InputDecoration(labelText: "任务名称"), 
+              validator: (v) => v!.isEmpty ? "必填" : null
+            ), 
             const SizedBox(height: 10), 
-            Row(children: [
-              Expanded(child: TextFormField(controller: _seatController, decoration: const InputDecoration(labelText: "神圣座位"))), 
-              const SizedBox(width: 10), 
-              Expanded(child: TextFormField(controller: _durationController, decoration: const InputDecoration(labelText: "预约时长")))
-            ]), 
-            TextFormField(controller: _signalController, decoration: const InputDecoration(labelText: "预约信号")), 
-            TextFormField(controller: _descController, decoration: const InputDecoration(labelText: "任务描述"), maxLines: 2)
+            TextFormField(
+              controller: _durationController, 
+              decoration: const InputDecoration(
+                labelText: "计划时长 (可选)",
+                hintText: "不填则为普通任务",
+                suffixText: "min",
+              ),
+              keyboardType: TextInputType.number,
+              validator: (v) {
+                if (v != null && v.isNotEmpty && int.tryParse(v) == null) {
+                  return "请输入有效数字";
+                }
+                return null;
+              },
+            ), 
+            const SizedBox(height: 10), 
+            TextFormField(
+              controller: _descController, 
+              decoration: const InputDecoration(labelText: "任务描述"), 
+              maxLines: 2
+            )
           ]
         )
       ), 
@@ -162,10 +185,23 @@ class _TaskDialogState extends State<TaskDialog> {
         FilledButton(onPressed: () { 
           if (_formKey.currentState!.validate()) { 
             final provider = Provider.of<RenormindProvider>(context, listen: false); 
+            int mins = 0;
+            if (_durationController.text.isNotEmpty) {
+              mins = int.parse(_durationController.text);
+            }
             if (widget.taskToEdit != null) { 
-              provider.updateTask(widget.taskToEdit!.id, name: _nameController.text, sacredSeat: _seatController.text, duration: _durationController.text, signal: _signalController.text, description: _descController.text); 
+              provider.updateTask(
+                widget.taskToEdit!.id, 
+                name: _nameController.text, 
+                plannedMinutes: mins, 
+                description: _descController.text
+              ); 
             } else { 
-              provider.addTask(name: _nameController.text, sacredSeat: _seatController.text, duration: _durationController.text, signal: _signalController.text, description: _descController.text); 
+              provider.addTask(
+                name: _nameController.text, 
+                plannedMinutes: mins, 
+                description: _descController.text
+              ); 
             } 
             Navigator.pop(context); 
           } 

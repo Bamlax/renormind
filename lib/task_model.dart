@@ -1,26 +1,61 @@
 class CtdpTask {
   final String id;
-  final String title; // 任务名称
-  final String level; // #, ##, ### (层级)
-  final String sacredSeat; // 神圣座位内容
-  final String reserveSignal; // 预约信号
-  final String reserveDuration; // 预约时长
+  final String? parentId;
+  final String name; // 任务名称
+  final int level;   // 层级
   final String description; // 描述
-  final DateTime timestamp; // 创建时间
   
-  bool isCompleted; // 是否打钩
-  bool isFailed; // 是否失败（被红色划掉）
+  final int plannedMinutes; // 计划时长 (分钟)
+  final int actualSeconds;  // 实际耗时 (秒)
+
+  final DateTime createdAt; // 创建时间
+  
+  // UI 状态字段
+  String displayId; 
+  String displaySymbol;
+  bool isDone;
+  bool isFailed;
 
   CtdpTask({
     required this.id,
-    required this.title,
+    this.parentId,
+    required this.name,
     required this.level,
-    this.sacredSeat = '',
-    this.reserveSignal = '',
-    this.reserveDuration = '',
     this.description = '',
-    required this.timestamp,
-    this.isCompleted = false,
+    this.plannedMinutes = 0,
+    this.actualSeconds = 0,
+    required this.createdAt,
+    this.displayId = '',
+    this.displaySymbol = '',
+    this.isDone = false,
     this.isFailed = false,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'parentId': parentId,
+    'name': name,
+    'level': level,
+    'description': description,
+    'plannedMinutes': plannedMinutes,
+    'actualSeconds': actualSeconds,
+    'createdAt': createdAt.toIso8601String(),
+    'isDone': isDone,
+    'isFailed': isFailed,
+  };
+
+  factory CtdpTask.fromJson(Map<String, dynamic> json) {
+    return CtdpTask(
+      id: json['id'],
+      parentId: json['parentId'],
+      name: json['name'],
+      level: json['level'],
+      description: json['description'] ?? '',
+      plannedMinutes: json['plannedMinutes'] ?? 0,
+      actualSeconds: json['actualSeconds'] ?? 0,
+      createdAt: DateTime.parse(json['createdAt']),
+      isDone: json['isDone'] ?? false,
+      isFailed: json['isFailed'] ?? false,
+    );
+  }
 }
