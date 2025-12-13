@@ -4,15 +4,17 @@ import '../providers/renormind_provider.dart';
 import '../task_model.dart';
 import 'ctdp_view.dart';
 import 'sacred_seat_page.dart'; 
-import 'settings_screen.dart'; // 引入设置页面
+import 'numbering_screen.dart'; 
+import 'settings_screen.dart';
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
 
   final List<Widget> _pages = const [
-    CtdpView(),           // Index 0
-    SacredSeatPage(),     // Index 1
-    Center(               // Index 2 (统计)
+    CtdpView(),           // 0
+    SacredSeatPage(),     // 1
+    NumberingScreen(),    // 2
+    Center(               // 3 (统计)
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -22,7 +24,7 @@ class MainScreen extends StatelessWidget {
         ],
       )
     ),
-    SettingsScreen(),     // Index 3 (替换了原来的占位符)
+    SettingsScreen(),     // 4
   ];
 
   // --- Actions ---
@@ -33,6 +35,17 @@ class MainScreen extends StatelessWidget {
           ? "添加子任务 (归属于: ${selectedTask.displayId})" 
           : "添加根目录任务";
       showDialog(context: context, builder: (ctx) => TaskDialog(title: titleText));
+  }
+
+  // 新增：长按 FAB 触发创建超级根目录
+  void _onFabSuperRoot(BuildContext context, RenormindProvider provider) {
+    showDialog(
+      context: context, 
+      builder: (ctx) => const TaskDialog(
+        title: "创建根根目录 (Super Root)", 
+        isSuperRoot: true // 开启超级模式
+      )
+    );
   }
 
   void _onEditCTDP(BuildContext context, RenormindProvider provider) {
@@ -59,7 +72,6 @@ class MainScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 监听 Provider 中的 tabIndex
     final provider = context.watch<RenormindProvider>();
     final currentIndex = provider.currentTabIndex;
     final isSelected = provider.selectedTaskId != null;
@@ -93,21 +105,24 @@ class MainScreen extends StatelessWidget {
         ),
       ),
       floatingActionButton: (currentIndex == 0) 
-        ? FloatingActionButton(
-            onPressed: () => _onFabCTDP(context, provider),
-            child: Icon(isSelected ? Icons.subdirectory_arrow_right : Icons.add),
-          ) 
+        ? GestureDetector(
+            onLongPress: () => _onFabSuperRoot(context, provider), // 长按逻辑
+            child: FloatingActionButton(
+              onPressed: () => _onFabCTDP(context, provider),
+              child: Icon(isSelected ? Icons.subdirectory_arrow_right : Icons.add),
+            ),
+          )
         : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,
         onDestinationSelected: (index) {
-          // 调用 Provider 的方法来切换页面
           provider.setTabIndex(index);
           if (index != 0) provider.clearSelection();
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.list_alt), label: 'CTDP'),
           NavigationDestination(icon: Icon(Icons.event_seat), label: '神圣座位'),
+          NavigationDestination(icon: Icon(Icons.numbers), label: '# 规则'), 
           NavigationDestination(icon: Icon(Icons.bar_chart), label: '统计'),
           NavigationDestination(icon: Icon(Icons.settings), label: '设置'),
         ],
@@ -116,11 +131,19 @@ class MainScreen extends StatelessWidget {
   }
 }
 
-// ... TaskDialog 保持不变 ...
+// CTDP TaskDialog (修改支持 isSuperRoot)
 class TaskDialog extends StatefulWidget { 
   final String title; 
   final CtdpTask? taskToEdit; 
-  const TaskDialog({super.key, required this.title, this.taskToEdit}); 
+  final bool isSuperRoot; // 新增标记
+
+  const TaskDialog({
+    super.key, 
+    required this.title, 
+    this.taskToEdit,
+    this.isSuperRoot = false, 
+  }); 
+  
   @override State<TaskDialog> createState() => _TaskDialogState(); 
 }
 
@@ -152,12 +175,19 @@ class _TaskDialogState extends State<TaskDialog> {
   @override Widget build(BuildContext context) { 
     return AlertDialog(
       title: Text(widget.title), 
-      scrollable: true, 
       content: Form(
         key: _formKey, 
         child: Column(
           mainAxisSize: MainAxisSize.min, 
           children: [
+            if (widget.isSuperRoot)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  "⚠️ 这将创建一个新的最高级任务，并将当前所有任务（包括现有的根任务）移动到其下作为子任务。",
+                  style: TextStyle(fontSize: 12, color: Colors.orange),
+                ),
+              ),
             TextFormField(
               controller: _nameController, 
               decoration: const InputDecoration(labelText: "任务名称"), 
@@ -197,14 +227,24 @@ class _TaskDialogState extends State<TaskDialog> {
             if (_durationController.text.isNotEmpty) {
               mins = int.parse(_durationController.text);
             }
+            
             if (widget.taskToEdit != null) { 
+              // 编辑模式
               provider.updateTask(
                 widget.taskToEdit!.id, 
                 name: _nameController.text, 
                 plannedMinutes: mins, 
                 description: _descController.text
               ); 
+            } else if (widget.isSuperRoot) {
+              // 超级根目录模式
+              provider.addSuperRoot(
+                name: _nameController.text,
+                plannedMinutes: mins,
+                description: _descController.text
+              );
             } else { 
+              // 普通添加模式
               provider.addTask(
                 name: _nameController.text, 
                 plannedMinutes: mins, 

@@ -1,16 +1,15 @@
 class CtdpTask {
   final String id;
   final String? parentId;
-  final String name; // 任务名称
-  final int level;   // 层级
-  final String description; // 描述
+  final String name; 
+  final int level;   
+  final String description; 
   
-  final int plannedMinutes; // 计划时长 (分钟)
-  final int actualSeconds;  // 实际耗时 (秒)
+  final int plannedMinutes; 
+  final int actualSeconds;  
 
-  final DateTime createdAt; // 创建时间
+  final DateTime createdAt; 
   
-  // UI 状态字段
   String displayId; 
   String displaySymbol;
   bool isDone;
@@ -22,8 +21,8 @@ class CtdpTask {
     required this.name,
     required this.level,
     this.description = '',
-    this.plannedMinutes = 0,
-    this.actualSeconds = 0,
+    this.plannedMinutes = 0, 
+    this.actualSeconds = 0,  
     required this.createdAt,
     this.displayId = '',
     this.displaySymbol = '',
@@ -56,6 +55,37 @@ class CtdpTask {
       createdAt: DateTime.parse(json['createdAt']),
       isDone: json['isDone'] ?? false,
       isFailed: json['isFailed'] ?? false,
+    );
+  }
+}
+
+// --- 编号配置模型 (修改版) ---
+class NumberingConfig {
+  final int targetLevel; 
+  bool failureReset;     
+  int scopeLevel;        
+  bool isUserModified; // 新增：标记用户是否手动修改过
+
+  NumberingConfig({
+    required this.targetLevel,
+    required this.failureReset,
+    required this.scopeLevel,
+    this.isUserModified = false, // 默认为 false
+  });
+
+  Map<String, dynamic> toJson() => {
+    'targetLevel': targetLevel,
+    'failureReset': failureReset,
+    'scopeLevel': scopeLevel,
+    'isUserModified': isUserModified,
+  };
+
+  factory NumberingConfig.fromJson(Map<String, dynamic> json) {
+    return NumberingConfig(
+      targetLevel: json['targetLevel'],
+      failureReset: json['failureReset'],
+      scopeLevel: json['scopeLevel'],
+      isUserModified: json['isUserModified'] ?? false,
     );
   }
 }

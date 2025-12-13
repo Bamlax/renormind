@@ -12,6 +12,14 @@ class VersionItem {
 
 // 在这里维护版本记录
 const List<VersionItem> appVersionHistory = [
+    VersionItem(
+    version: "v0.3.0",
+    date: "2025-12-13",
+    changes: [
+      "新增#的管理界面",
+      "新增根根目录的创建功能",
+    ],
+  ),
   VersionItem(
     version: "v0.2.0",
     date: "2025-12-11",
