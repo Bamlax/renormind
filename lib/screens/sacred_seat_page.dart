@@ -149,9 +149,19 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
               child: Text("选择当前要攻克的任务", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
             ...provider.tasks.where((t) => !t.isDone).map((task) { 
+              // 构建计划时间文本
+              String planText = "计划: ";
+              if (task.plannedMinutes == -1) {
+                planText = "正计时";
+              } else if (task.plannedMinutes > 0) {
+                planText += "${task.plannedMinutes}m";
+              } else {
+                planText = "无"; // 普通任务
+              }
+
               return ListTile(
                 title: Text("${task.displaySymbol} ${task.name}"),
-                subtitle: Text("计划: ${task.plannedMinutes}m | 已耗时: ${task.actualSeconds}s"),
+                subtitle: Text("$planText | 已耗时: ${task.actualSeconds}s"),
                 onTap: () {
                   provider.setSacredTask(task.id);
                   Navigator.pop(ctx);
@@ -296,13 +306,16 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
                 ),
               ),
               Center(
-                child: Text(
-                  _displayTime,
-                  style: TextStyle(
-                    fontSize: 60,
-                    fontWeight: FontWeight.bold,
-                    color: _timerColor,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _displayTime,
+                    style: TextStyle(
+                      fontSize: 60,
+                      fontWeight: FontWeight.bold,
+                      color: _timerColor,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
               ),
@@ -313,7 +326,6 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
                 Row(
                   children: [
                     Expanded(
-                      // 主操作按钮
                       child: SizedBox(
                         height: 50,
                         child: FilledButton.icon(
@@ -338,7 +350,6 @@ class _SacredSeatPageState extends State<SacredSeatPage> {
                     ),
                     const SizedBox(width: 16),
                     Expanded(
-                      // 次要操作按钮 (灰色取消)
                       child: SizedBox(
                         height: 50,
                         child: OutlinedButton.icon(

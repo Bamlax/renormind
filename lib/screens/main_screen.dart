@@ -14,7 +14,7 @@ class MainScreen extends StatelessWidget {
     CtdpView(),           // 0
     SacredSeatPage(),     // 1
     NumberingScreen(),    // 2
-    Center(               // 3 (统计)
+    Center(               // 3
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -37,13 +37,12 @@ class MainScreen extends StatelessWidget {
       showDialog(context: context, builder: (ctx) => TaskDialog(title: titleText));
   }
 
-  // 新增：长按 FAB 触发创建超级根目录
   void _onFabSuperRoot(BuildContext context, RenormindProvider provider) {
     showDialog(
       context: context, 
       builder: (ctx) => const TaskDialog(
         title: "创建根根目录 (Super Root)", 
-        isSuperRoot: true // 开启超级模式
+        isSuperRoot: true
       )
     );
   }
@@ -106,7 +105,7 @@ class MainScreen extends StatelessWidget {
       ),
       floatingActionButton: (currentIndex == 0) 
         ? GestureDetector(
-            onLongPress: () => _onFabSuperRoot(context, provider), // 长按逻辑
+            onLongPress: () => _onFabSuperRoot(context, provider),
             child: FloatingActionButton(
               onPressed: () => _onFabCTDP(context, provider),
               child: Icon(isSelected ? Icons.subdirectory_arrow_right : Icons.add),
@@ -131,11 +130,11 @@ class MainScreen extends StatelessWidget {
   }
 }
 
-// CTDP TaskDialog (修改支持 isSuperRoot)
+// CTDP TaskDialog
 class TaskDialog extends StatefulWidget { 
   final String title; 
   final CtdpTask? taskToEdit; 
-  final bool isSuperRoot; // 新增标记
+  final bool isSuperRoot; 
 
   const TaskDialog({
     super.key, 
@@ -158,7 +157,7 @@ class _TaskDialogState extends State<TaskDialog> {
     final t = widget.taskToEdit; 
     _nameController = TextEditingController(text: t?.name ?? ''); 
     String durationText = '';
-    if (t != null && t.plannedMinutes > 0) {
+    if (t != null && t.plannedMinutes != 0) {
       durationText = t.plannedMinutes.toString();
     }
     _durationController = TextEditingController(text: durationText); 
@@ -184,7 +183,7 @@ class _TaskDialogState extends State<TaskDialog> {
               const Padding(
                 padding: EdgeInsets.only(bottom: 12),
                 child: Text(
-                  "⚠️ 这将创建一个新的最高级任务，并将当前所有任务（包括现有的根任务）移动到其下作为子任务。",
+                  "⚠️ 这将创建一个新的最高级任务，并将当前所有任务移动到其下。",
                   style: TextStyle(fontSize: 12, color: Colors.orange),
                 ),
               ),
@@ -198,13 +197,14 @@ class _TaskDialogState extends State<TaskDialog> {
               controller: _durationController, 
               decoration: const InputDecoration(
                 labelText: "计划时长 (可选)",
-                hintText: "不填则为普通任务",
+                // --- 修改了这里的提示 ---
+                hintText: "不填=普通, -1=正计时",
                 suffixText: "min",
               ),
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(signed: true), 
               validator: (v) {
-                if (v != null && v.isNotEmpty && int.tryParse(v) == null) {
-                  return "请输入有效数字";
+                if (v != null && v.isNotEmpty) {
+                  if (int.tryParse(v) == null) return "请输入数字";
                 }
                 return null;
               },
@@ -229,7 +229,6 @@ class _TaskDialogState extends State<TaskDialog> {
             }
             
             if (widget.taskToEdit != null) { 
-              // 编辑模式
               provider.updateTask(
                 widget.taskToEdit!.id, 
                 name: _nameController.text, 
@@ -237,14 +236,12 @@ class _TaskDialogState extends State<TaskDialog> {
                 description: _descController.text
               ); 
             } else if (widget.isSuperRoot) {
-              // 超级根目录模式
               provider.addSuperRoot(
                 name: _nameController.text,
                 plannedMinutes: mins,
                 description: _descController.text
               );
             } else { 
-              // 普通添加模式
               provider.addTask(
                 name: _nameController.text, 
                 plannedMinutes: mins, 

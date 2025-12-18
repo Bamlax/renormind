@@ -125,7 +125,8 @@ class _CtdpViewState extends State<CtdpView> {
                             decoration: decoration,
                           ),
                         ),
-                        if (task.plannedMinutes > 0 || task.actualSeconds > 0)
+                        // 只要不为 0 (包括负数) 或 已经有实际耗时，就显示时间信息
+                        if (task.plannedMinutes != 0 || task.actualSeconds > 0)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
                             child: _buildTimeInfo(task),
@@ -160,9 +161,7 @@ class _CtdpViewState extends State<CtdpView> {
                       if (task.isDone || task.isFailed) {
                         provider.toggleDone(task.id);
                       } else {
-                        // --- 逻辑分支 ---
-                        if (task.plannedMinutes > 0) {
-                          // [有计划时间] -> 跳转并开始倒计时
+                        if (task.plannedMinutes > 0 || task.plannedMinutes == -1) {
                           if (provider.isSessionRunning) {
                              ScaffoldMessenger.of(context).showSnackBar(
                                const SnackBar(content: Text("已有任务正在进行，请先完成或取消当前预约"))
@@ -172,7 +171,6 @@ class _CtdpViewState extends State<CtdpView> {
                              provider.startDirectTaskSession(task);
                           }
                         } else {
-                          // [无计划时间] -> 直接完成
                           provider.toggleDone(task.id);
                         }
                       }
@@ -229,31 +227,47 @@ class _CtdpViewState extends State<CtdpView> {
     );
   }
 
+  // --- 修改后的时间显示逻辑 ---
   Widget _buildTimeInfo(CtdpTask task) {
     String text = "";
     Color color = Colors.blueGrey;
 
+    // 1. 处理计划显示 (-1 特殊处理)
     if (task.plannedMinutes > 0) {
       text = "计划: ${task.plannedMinutes}m";
+    } else if (task.plannedMinutes == -1) {
+      // 如果还没开始/没完成，只显示"正计时"
+      if (task.actualSeconds == 0) {
+        text = "正计时";
+      }
     }
 
+    // 2. 处理实际时间显示
     if (task.actualSeconds > 0) {
       int actualMins = task.actualSeconds ~/ 60; 
       int actualSecs = task.actualSeconds % 60;  
       
-      String percentStr = "";
       if (task.plannedMinutes > 0) {
+        // [普通计划任务]：计划: xx | 实际: xx (xx%)
+        if (text.isNotEmpty) text += " | ";
+        
+        // 计算百分比
         int plannedSeconds = task.plannedMinutes * 60;
         double diff = (task.actualSeconds - plannedSeconds) / plannedSeconds * 100;
         String sign = diff > 0 ? "+" : "";
-        percentStr = " ($sign${diff.toStringAsFixed(2)}%)";
+        String percentStr = " ($sign${diff.toStringAsFixed(2)}%)";
+        
         if (diff > 10) color = Colors.red;
         else if (diff < -10) color = Colors.green;
         else color = Colors.black87;
+
+        text += "实际: ${actualMins}m ${actualSecs}s$percentStr";
+
+      } else if (task.plannedMinutes == -1) {
+        // [正计时任务]：直接显示 "正计时: xxm xxs"
+        text = "正计时: ${actualMins}m ${actualSecs}s";
+        color = Colors.black87; 
       }
-      
-      if (text.isNotEmpty) text += " | ";
-      text += "实际: ${actualMins}m ${actualSecs}s$percentStr";
     }
 
     return Text(

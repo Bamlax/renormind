@@ -12,6 +12,15 @@ class VersionItem {
 
 // 在这里维护版本记录
 const List<VersionItem> appVersionHistory = [
+      VersionItem(
+    version: "v0.4.0",
+    date: "2025-12-18",
+    changes: [
+      "新增填写-1直接开始正计时的功能",
+      "修复正计时时因字体太大导致的错误显示",
+      "修复预约时长无法保存的bug",
+    ],
+  ),
     VersionItem(
     version: "v0.3.0",
     date: "2025-12-13",
