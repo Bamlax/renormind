@@ -59,18 +59,18 @@ class CtdpTask {
   }
 }
 
-// --- 编号配置模型 (修改版) ---
+// --- 编号配置模型 ---
 class NumberingConfig {
   final int targetLevel; 
   bool failureReset;     
   int scopeLevel;        
-  bool isUserModified; // 新增：标记用户是否手动修改过
+  bool isUserModified; // 关键字段：标记用户是否手动修改过
 
   NumberingConfig({
     required this.targetLevel,
     required this.failureReset,
     required this.scopeLevel,
-    this.isUserModified = false, // 默认为 false
+    this.isUserModified = false, 
   });
 
   Map<String, dynamic> toJson() => {

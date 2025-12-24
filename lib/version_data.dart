@@ -12,7 +12,14 @@ class VersionItem {
 
 // 在这里维护版本记录
 const List<VersionItem> appVersionHistory = [
-      VersionItem(
+    VersionItem(
+    version: "v0.5.0",
+    date: "2025-12-24",
+    changes: [
+      "新增计时时在通知栏显示",
+    ],
+  ),
+    VersionItem(
     version: "v0.4.0",
     date: "2025-12-18",
     changes: [

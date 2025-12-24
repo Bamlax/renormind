@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../task_model.dart'; 
 
@@ -63,23 +64,30 @@ class RenormindProvider extends ChangeNotifier {
     }
   }
 
+  // --- 后台服务控制 ---
+  Future<void> _startBackgroundService() async {
+    // 只要开启服务即可，数据由服务自己去 Prefs 拉取
+    final service = FlutterBackgroundService();
+    if (!await service.isRunning()) {
+      await service.startService();
+    }
+  }
+
+  void _stopBackgroundService() {
+    final service = FlutterBackgroundService();
+    service.invoke('stop');
+  }
+
   // --- 编号配置逻辑 ---
 
-  // 用户手动修改配置
   void updateNumberingConfig(int level, {bool? failureReset, int? scopeLevel}) {
-    NumberingConfig oldConfig;
-    if (_numberingConfigs.containsKey(level)) {
-      oldConfig = _numberingConfigs[level]!;
-    } else {
-      // 防御性代码，理论上 recalculate 已经生成了
-      oldConfig = NumberingConfig(targetLevel: level, failureReset: false, scopeLevel: level - 1);
-    }
+    NumberingConfig oldConfig = _numberingConfigs[level] ?? NumberingConfig(targetLevel: level, failureReset: false, scopeLevel: level - 1);
 
     _numberingConfigs[level] = NumberingConfig(
       targetLevel: level,
       failureReset: failureReset ?? oldConfig.failureReset,
       scopeLevel: scopeLevel ?? oldConfig.scopeLevel,
-      isUserModified: true, // 关键：标记为用户已修改，以后自动逻辑将不再覆盖它
+      isUserModified: true, 
     );
 
     _saveNumberingConfigs();
@@ -87,88 +95,85 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 一键恢复默认 (清空用户修改标记)
   void resetAllConfigsToDefault() {
     _numberingConfigs.updateAll((key, val) {
       return NumberingConfig(
         targetLevel: val.targetLevel,
-        failureReset: val.failureReset, // 值稍后会被 recalculate 覆盖
+        failureReset: val.failureReset,
         scopeLevel: val.scopeLevel,
-        isUserModified: false, // 关键：重置标记
+        isUserModified: false, 
       );
     });
     
-    // 立即重新计算以应用默认规则
     _recalculateCtdpTree();
     _saveNumberingConfigs();
     notifyListeners();
   }
 
-  // 智能应用默认规则
-  // 此方法在 _recalculateCtdpTree 中被调用，基于当前的 maxLevel
   void _applyDynamicDefaults(int maxLevel) {
     bool changed = false;
-
     for (int i = 1; i <= maxLevel; i++) {
-      // 获取现有配置，如果没有则创建
-      NumberingConfig config = _numberingConfigs[i] ?? NumberingConfig(
-        targetLevel: i, 
-        failureReset: false, 
-        scopeLevel: 0,
-        isUserModified: false 
-      );
+      NumberingConfig config = _numberingConfigs[i] ?? NumberingConfig(targetLevel: i, failureReset: false, scopeLevel: 0, isUserModified: false);
 
-      // 如果用户没有手动修改过，强制应用默认规则
       if (!config.isUserModified) {
-        // 规则1: 只有底层 (#) 开启重置
         bool isLeaf = (i == maxLevel);
-        
-        // 规则2: 根层级 Scope 为全局(0)，其他层级 Scope 为父级(i-1)
         int defaultScope = (i == 1) ? 0 : i - 1;
 
-        // 检查是否有变化，有变化才更新
         if (config.failureReset != isLeaf || config.scopeLevel != defaultScope) {
           _numberingConfigs[i] = NumberingConfig(
             targetLevel: i,
             failureReset: isLeaf,
             scopeLevel: defaultScope,
-            isUserModified: false, // 保持未修改状态
+            isUserModified: false,
           );
           changed = true;
         } else if (!_numberingConfigs.containsKey(i)) {
-          // 如果是新创建的层级
           _numberingConfigs[i] = config;
           changed = true;
         }
-      } 
-      // 如果 isUserModified == true，我们完全不碰它
+      }
     }
+    if (changed) _saveNumberingConfigs();
+  }
 
-    if (changed) {
-      _saveNumberingConfigs();
-    }
+  void _enforceFailureResetLogic() {
+    bool changed = false;
+    _numberingConfigs.forEach((level, config) {
+      bool isLeaf = (level == _currentMaxLevel);
+      // 只有未修改过的配置才强制跟随规则，或者你想强制所有层级都遵循？
+      // 根据之前的需求，这里似乎是强制逻辑。
+      if (!config.isUserModified) {
+         if (config.failureReset != isLeaf) {
+           config.failureReset = isLeaf;
+           changed = true;
+         }
+      }
+    });
+    if (changed) _saveNumberingConfigs();
   }
 
   // --- 导航 & 业务逻辑 ---
   void setTabIndex(int index) { _currentTabIndex = index; notifyListeners(); }
   
-  void jumpToSacredSeat(CtdpTask task) {
+  Future<void> jumpToSacredSeat(CtdpTask task) async {
     if (_isSessionRunning) { _currentTabIndex = 1; notifyListeners(); return; }
     _sacredTaskId = task.id;
     _reserveDurationMinutes = 5; 
     _currentTabIndex = 1; 
-    _saveSeatData();
+    await _saveSeatData(); 
     notifyListeners();
   }
 
-  void startDirectTaskSession(CtdpTask task) {
+  Future<void> startDirectTaskSession(CtdpTask task) async {
     if (_isSessionRunning) { _currentTabIndex = 1; notifyListeners(); return; }
     _sacredTaskId = task.id;
     _reserveDurationMinutes = 0;
     _sessionStartTime = DateTime.now();
     _isSessionRunning = true;
     _currentTabIndex = 1;
-    _saveSeatData();
+    
+    await _saveSeatData(); 
+    _startBackgroundService(); 
     notifyListeners();
   }
 
@@ -186,19 +191,23 @@ class RenormindProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void startSacredSession() {
+  Future<void> startSacredSession() async {
     if (_sacredTaskId == null) return;
     _sessionStartTime = DateTime.now();
     _isSessionRunning = true;
-    _saveSeatData();
+    
+    await _saveSeatData(); 
+    _startBackgroundService();
     notifyListeners();
   }
 
-  void skipReservation() {
+  Future<void> skipReservation() async {
     if (!_isSessionRunning) return;
     _reserveDurationMinutes = 0;
     _sessionStartTime = DateTime.now();
-    _saveSeatData();
+    
+    await _saveSeatData(); 
+    _startBackgroundService(); // 重新调用以确保服务运行（虽然后台会自动刷新，但调用一下无害）
     notifyListeners();
   }
 
@@ -215,6 +224,7 @@ class RenormindProvider extends ChangeNotifier {
     _sessionStartTime = null;
     _isSessionRunning = false;
     _saveSeatData();
+    _stopBackgroundService();
     notifyListeners();
   }
 
@@ -222,6 +232,7 @@ class RenormindProvider extends ChangeNotifier {
     _sessionStartTime = null;
     _isSessionRunning = false;
     _saveSeatData();
+    _stopBackgroundService();
     notifyListeners();
   }
 
@@ -239,6 +250,8 @@ class RenormindProvider extends ChangeNotifier {
       actualSeconds: 0, description: description, createdAt: DateTime.now(),
     );
     _rawTasks.add(newTask);
+    _recalculateCtdpTree(); 
+    _enforceFailureResetLogic();
     _recalculateCtdpTree();
     _saveToStorage();
     notifyListeners();
@@ -247,8 +260,6 @@ class RenormindProvider extends ChangeNotifier {
   void addSuperRoot({required String name, required int plannedMinutes, String description = ''}) {
     final newRootId = DateTime.now().toIso8601String();
     
-    // 配置迁移：因为层级物理移动了，配置也要跟着移动
-    // 这里依然需要迁移，因为这是结构性变化，用户的修改意图是针对"那层任务"的
     Map<int, NumberingConfig> newConfigs = {};
     _numberingConfigs.forEach((level, config) {
       int newLevel = level + 1;
@@ -257,10 +268,9 @@ class RenormindProvider extends ChangeNotifier {
         targetLevel: newLevel,
         failureReset: config.failureReset,
         scopeLevel: newScope,
-        isUserModified: config.isUserModified, // 保留用户的修改标记
+        isUserModified: config.isUserModified,
       );
     });
-    // 新的 Level 1 是全新的，肯定是默认状态
     newConfigs[1] = NumberingConfig(targetLevel: 1, failureReset: false, scopeLevel: 0, isUserModified: false);
 
     _numberingConfigs = newConfigs;
@@ -276,6 +286,8 @@ class RenormindProvider extends ChangeNotifier {
     }
     _rawTasks.add(newRoot);
 
+    _recalculateCtdpTree();
+    _enforceFailureResetLogic(); 
     _recalculateCtdpTree();
     _saveToStorage();
     notifyListeners();
@@ -309,10 +321,7 @@ class RenormindProvider extends ChangeNotifier {
     _rawTasks.removeWhere((t) => idsToDelete.contains(t.id));
     if (_sacredTaskId != null && idsToDelete.contains(_sacredTaskId)) { _sacredTaskId = null; if (_isSessionRunning) stopSacredSession(); }
     if (_selectedTaskId != null && idsToDelete.contains(_selectedTaskId)) { _selectedTaskId = null; }
-    
-    _recalculateCtdpTree(); 
-    _saveToStorage(); 
-    notifyListeners();
+    _recalculateCtdpTree(); _enforceFailureResetLogic(); _recalculateCtdpTree(); _saveToStorage(); notifyListeners();
   }
 
   void toggleDone(String id) {
@@ -362,6 +371,7 @@ class RenormindProvider extends ChangeNotifier {
     if (sessionStartIso != null && sessionStartIso.isNotEmpty) {
       _sessionStartTime = DateTime.parse(sessionStartIso);
       _isSessionRunning = true;
+      _startBackgroundService(); 
     }
 
     _isDataLoaded = true;
@@ -398,11 +408,8 @@ class RenormindProvider extends ChangeNotifier {
       return;
     }
     
-    // 1. 计算最大层级
     int maxLevel = _rawTasks.fold(0, (prev, curr) => curr.level > prev ? curr.level : prev);
     _currentMaxLevel = maxLevel;
-    
-    // 2. 关键：应用智能默认规则 (在计算树之前应用配置更新)
     _applyDynamicDefaults(maxLevel);
 
     var roots = _rawTasks.where((t) => t.parentId == null).toList();
@@ -428,7 +435,6 @@ class RenormindProvider extends ChangeNotifier {
     Map<int, String> currentIds = Map.from(ancestorIds);
     currentIds[node.level] = node.id; 
 
-    // 防御性获取，理论上 _applyDynamicDefaults 已经保证了所有 level 都有配置
     final config = _numberingConfigs[node.level] ?? NumberingConfig(targetLevel: node.level, failureReset: false, scopeLevel: 0);
     
     String scopeId = "root";
