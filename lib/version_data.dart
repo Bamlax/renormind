@@ -12,6 +12,14 @@ class VersionItem {
 
 // 在这里维护版本记录
 const List<VersionItem> appVersionHistory = [
+      VersionItem(
+    version: "v0.5.1",
+    date: "2025-12-25",
+    changes: [
+      "修复通知栏倒计时错误显示为正计时",
+      "修复手动开始计时后显示预约结束的问题",
+    ],
+  ),
     VersionItem(
     version: "v0.5.0",
     date: "2025-12-24",

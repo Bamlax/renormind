@@ -6,10 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 @pragma('vm:entry-point')
 class BackgroundTimerService {
-  static const notificationId = 888;       // 常驻通知 ID
-  static const alertNotificationId = 999;  // 弹窗通知 ID
+  static const notificationId = 888;
+  static const alertNotificationId = 999;
   
-  // 使用 _v3 确保创建全新的通道，清除你之前的静音设置
   static const notificationChannelId = 'renormind_timer_channel_v3';
   static const alertChannelId = 'renormind_alert_channel_v3';
 
@@ -17,7 +16,6 @@ class BackgroundTimerService {
     final service = FlutterBackgroundService();
     final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
-    // 1. 计时器通道 (静音，低干扰)
     const AndroidNotificationChannel timerChannel = AndroidNotificationChannel(
       notificationChannelId,
       'Renormind 计时器',
@@ -25,7 +23,6 @@ class BackgroundTimerService {
       importance: Importance.low, 
     );
 
-    // 2. 提醒通道 (高优先级，有声音/震动)
     const AndroidNotificationChannel alertChannel = AndroidNotificationChannel(
       alertChannelId,
       'Renormind 提醒',
@@ -63,10 +60,6 @@ class BackgroundTimerService {
   }
 }
 
-// ==========================================
-// 顶层入口函数
-// ==========================================
-
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -76,7 +69,6 @@ void onServiceStart(ServiceInstance service) async {
 
   final prefs = await SharedPreferences.getInstance();
 
-  // 再次创建通道 (保险起见)
   const AndroidNotificationChannel timerChannel = AndroidNotificationChannel(
     BackgroundTimerService.notificationChannelId,
     'Renormind 计时器',
@@ -88,43 +80,68 @@ void onServiceStart(ServiceInstance service) async {
           AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(timerChannel);
 
-  bool isTaskPhase = false;
+  // 关键：记录上一次是否处于预约阶段
+  // 初始化为 true (假设刚开始)，稍后根据实际时间修正
+  // 如果直接开始任务 (reserve=0)，这个标志位会在第一次 check 时帮助我们避免弹窗
+  bool wasInReservationPhase = true;
 
   Timer.periodic(const Duration(seconds: 1), (timer) async {
     await prefs.reload(); 
     
     String? savedStartIso = prefs.getString('session_start_time');
-    int savedDuration = prefs.getInt('reserve_duration') ?? 0;
+    int savedReserveMinutes = prefs.getInt('reserve_duration') ?? 0;
+    // 读取任务计划时长 (0 或 -1 表示正计时，>0 表示倒计时)
+    int plannedMinutes = prefs.getInt('current_task_planned_minutes') ?? 0;
 
     if (savedStartIso == null) return;
 
     final startTime = DateTime.parse(savedStartIso);
     final now = DateTime.now();
-    final reserveDuration = Duration(minutes: savedDuration);
+    final reserveDuration = Duration(minutes: savedReserveMinutes);
     final taskStartTime = startTime.add(reserveDuration);
 
     String title = "";
     String content = "";
     bool shouldAlert = false;
 
-    if (now.isBefore(taskStartTime)) {
+    // 判断当前是否处于预约阶段
+    bool isInReservationPhase = now.isBefore(taskStartTime);
+
+    // 逻辑：如果上一秒还在预约阶段，这一秒不在了，且预约时长不为0 => 触发弹窗
+    if (wasInReservationPhase && !isInReservationPhase && savedReserveMinutes > 0) {
+      shouldAlert = true;
+    }
+    // 更新状态
+    wasInReservationPhase = isInReservationPhase;
+
+    if (isInReservationPhase) {
+      // --- 预约阶段 ---
       final remaining = taskStartTime.difference(now).inSeconds;
       title = "预约倒计时";
       content = _formatHelper(remaining);
-      isTaskPhase = false;
     } else {
-      final elapsed = now.difference(taskStartTime).inSeconds;
+      // --- 任务阶段 ---
+      final taskElapsedSeconds = now.difference(taskStartTime).inSeconds;
       
-      if (!isTaskPhase) {
-        shouldAlert = true;
-        isTaskPhase = true;
+      if (plannedMinutes > 0) {
+        // [有计划时间] -> 显示倒计时 / 超时
+        final int plannedSeconds = plannedMinutes * 60;
+        final int remainingTaskTime = plannedSeconds - taskElapsedSeconds;
+        
+        if (remainingTaskTime >= 0) {
+          title = "任务倒计时";
+          content = _formatHelper(remainingTaskTime);
+        } else {
+          title = "任务已超时";
+          content = "+${_formatHelper(-remainingTaskTime)}";
+        }
+      } else {
+        // [无计划时间 / -1] -> 显示正计时
+        title = "任务进行中";
+        content = "+${_formatHelper(taskElapsedSeconds)}";
       }
-
-      title = "任务进行中";
-      content = "+${_formatHelper(elapsed)}";
     }
 
-    // --- 1. 更新常驻通知 ---
     flutterLocalNotificationsPlugin.show(
       BackgroundTimerService.notificationId,
       title,
@@ -137,14 +154,13 @@ void onServiceStart(ServiceInstance service) async {
           ongoing: true,
           onlyAlertOnce: true,
           showWhen: false,
-          // 关键：在这里设置 public 即可在锁屏显示内容
           visibility: NotificationVisibility.public,
           category: AndroidNotificationCategory.service,
+          priority: Priority.defaultPriority,
         ),
       ),
     );
 
-    // --- 2. 触发强提醒 (弹窗) ---
     if (shouldAlert) {
       flutterLocalNotificationsPlugin.show(
         BackgroundTimerService.alertNotificationId, 
@@ -152,14 +168,13 @@ void onServiceStart(ServiceInstance service) async {
         "任务正计时已自动开始。",
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'renormind_alert_channel_v3', // 对应上面的 V3 ID
+            'renormind_alert_channel_v3', 
             'Renormind 提醒',
             importance: Importance.max, 
             priority: Priority.high,    
             playSound: true,
             enableVibration: true,
             icon: '@mipmap/ic_launcher',
-            // 关键：在这里设置 public
             visibility: NotificationVisibility.public,
             category: AndroidNotificationCategory.event, 
           ),

@@ -66,7 +66,6 @@ class RenormindProvider extends ChangeNotifier {
 
   // --- 后台服务控制 ---
   Future<void> _startBackgroundService() async {
-    // 只要开启服务即可，数据由服务自己去 Prefs 拉取
     final service = FlutterBackgroundService();
     if (!await service.isRunning()) {
       await service.startService();
@@ -140,8 +139,6 @@ class RenormindProvider extends ChangeNotifier {
     bool changed = false;
     _numberingConfigs.forEach((level, config) {
       bool isLeaf = (level == _currentMaxLevel);
-      // 只有未修改过的配置才强制跟随规则，或者你想强制所有层级都遵循？
-      // 根据之前的需求，这里似乎是强制逻辑。
       if (!config.isUserModified) {
          if (config.failureReset != isLeaf) {
            config.failureReset = isLeaf;
@@ -207,7 +204,7 @@ class RenormindProvider extends ChangeNotifier {
     _sessionStartTime = DateTime.now();
     
     await _saveSeatData(); 
-    _startBackgroundService(); // 重新调用以确保服务运行（虽然后台会自动刷新，但调用一下无害）
+    _startBackgroundService(); 
     notifyListeners();
   }
 
@@ -389,8 +386,25 @@ class RenormindProvider extends ChangeNotifier {
     await prefs.setString('seat_content', _seatContent);
     await prefs.setString('reserve_content', _reserveContent);
     await prefs.setInt('reserve_duration', _reserveDurationMinutes);
-    if (_sacredTaskId != null) { await prefs.setString('sacred_task_id', _sacredTaskId!); } else { await prefs.remove('sacred_task_id'); }
-    if (_sessionStartTime != null && _isSessionRunning) { await prefs.setString('session_start_time', _sessionStartTime!.toIso8601String()); } else { await prefs.remove('session_start_time'); }
+    if (_sacredTaskId != null) { 
+      await prefs.setString('sacred_task_id', _sacredTaskId!); 
+      // --- 关键修改：保存当前任务的计划时长到 SP，供后台服务读取 ---
+      final task = currentSacredTask;
+      if (task != null) {
+        await prefs.setInt('current_task_planned_minutes', task.plannedMinutes);
+      } else {
+        await prefs.remove('current_task_planned_minutes');
+      }
+    } else { 
+      await prefs.remove('sacred_task_id'); 
+      await prefs.remove('current_task_planned_minutes');
+    }
+    
+    if (_sessionStartTime != null && _isSessionRunning) { 
+      await prefs.setString('session_start_time', _sessionStartTime!.toIso8601String()); 
+    } else { 
+      await prefs.remove('session_start_time'); 
+    }
   }
 
   Future<void> _saveNumberingConfigs() async {
@@ -399,78 +413,41 @@ class RenormindProvider extends ChangeNotifier {
     await prefs.setString('numbering_configs', jsonEncode(encoded));
   }
 
-  // --- 核心：高级树形计算与计数器逻辑 ---
-
+  // ... (Tree calculation remains unchanged)
   void _recalculateCtdpTree() {
     List<CtdpTask> result = [];
-    if (_rawTasks.isEmpty) {
-      _displayTasks = [];
-      return;
-    }
-    
+    if (_rawTasks.isEmpty) { _displayTasks = []; return; }
     int maxLevel = _rawTasks.fold(0, (prev, curr) => curr.level > prev ? curr.level : prev);
     _currentMaxLevel = maxLevel;
     _applyDynamicDefaults(maxLevel);
-
     var roots = _rawTasks.where((t) => t.parentId == null).toList();
     roots.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    
     Map<String, Map<String, dynamic>> contextCounters = {};
-
     for (var root in roots) {
       Map<int, String> ancestorIds = {0: "root"}; 
       _processAdvancedNode(root, maxLevel, ancestorIds, contextCounters, result);
     }
-    
     _displayTasks = result;
   }
 
-  void _processAdvancedNode(
-    CtdpTask node, 
-    int globalMaxLevel, 
-    Map<int, String> ancestorIds, 
-    Map<String, Map<String, dynamic>> contextCounters,
-    List<CtdpTask> result
-  ) {
+  void _processAdvancedNode(CtdpTask node, int globalMaxLevel, Map<int, String> ancestorIds, Map<String, Map<String, dynamic>> contextCounters, List<CtdpTask> result) {
     Map<int, String> currentIds = Map.from(ancestorIds);
     currentIds[node.level] = node.id; 
-
     final config = _numberingConfigs[node.level] ?? NumberingConfig(targetLevel: node.level, failureReset: false, scopeLevel: 0);
-    
     String scopeId = "root";
-    if (config.scopeLevel > 0) {
-      scopeId = currentIds[config.scopeLevel] ?? "root"; 
-    } else {
-      scopeId = "root"; 
-    }
-
+    if (config.scopeLevel > 0) { scopeId = currentIds[config.scopeLevel] ?? "root"; } else { scopeId = "root"; }
     String counterKey = "${node.level}_$scopeId";
-
-    if (!contextCounters.containsKey(counterKey)) {
-      contextCounters[counterKey] = {'count': 0, 'lastFailed': false};
-    }
-    
+    if (!contextCounters.containsKey(counterKey)) { contextCounters[counterKey] = {'count': 0, 'lastFailed': false}; }
     var counterData = contextCounters[counterKey]!;
-    
-    if (counterData['lastFailed'] == true && config.failureReset) {
-      counterData['count'] = 1;
-    } else {
-      counterData['count'] = (counterData['count'] as int) + 1;
-    }
-    
+    if (counterData['lastFailed'] == true && config.failureReset) { counterData['count'] = 1; } else { counterData['count'] = (counterData['count'] as int) + 1; }
     counterData['lastFailed'] = node.isFailed;
-
     node.displayId = counterData['count'].toString();
     int hashCount = globalMaxLevel - node.level + 1;
     if (hashCount < 1) hashCount = 1;
     node.displaySymbol = '#' * hashCount;
     result.add(node);
-
     var children = _rawTasks.where((t) => t.parentId == node.id).toList();
     children.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    
-    for (var child in children) {
-      _processAdvancedNode(child, globalMaxLevel, currentIds, contextCounters, result);
-    }
+    for (var child in children) { _processAdvancedNode(child, globalMaxLevel, currentIds, contextCounters, result); }
   }
 }
