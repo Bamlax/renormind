@@ -12,7 +12,14 @@ class VersionItem {
 
 // 在这里维护版本记录
 const List<VersionItem> appVersionHistory = [
-      VersionItem(
+    VersionItem(
+    version: "v0.5.2",
+    date: "2026-1-4",
+    changes: [
+      "修复通知栏的多于提示（同步中）",
+    ],
+  ),
+    VersionItem(
     version: "v0.5.1",
     date: "2025-12-25",
     changes: [

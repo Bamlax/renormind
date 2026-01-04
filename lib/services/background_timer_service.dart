@@ -49,7 +49,7 @@ class BackgroundTimerService {
         isForegroundMode: true,
         notificationChannelId: notificationChannelId,
         initialNotificationTitle: 'Renormind',
-        initialNotificationContent: '同步数据中...',
+        initialNotificationContent: '', // 初始状态为空
         foregroundServiceNotificationId: notificationId,
       ),
       iosConfiguration: IosConfiguration(
@@ -80,20 +80,36 @@ void onServiceStart(ServiceInstance service) async {
           AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(timerChannel);
 
-  // 关键：记录上一次是否处于预约阶段
-  // 初始化为 true (假设刚开始)，稍后根据实际时间修正
-  // 如果直接开始任务 (reserve=0)，这个标志位会在第一次 check 时帮助我们避免弹窗
   bool wasInReservationPhase = true;
 
-  Timer.periodic(const Duration(seconds: 1), (timer) async {
+  Future<void> tick() async {
     await prefs.reload(); 
     
     String? savedStartIso = prefs.getString('session_start_time');
     int savedReserveMinutes = prefs.getInt('reserve_duration') ?? 0;
-    // 读取任务计划时长 (0 或 -1 表示正计时，>0 表示倒计时)
     int plannedMinutes = prefs.getInt('current_task_planned_minutes') ?? 0;
 
-    if (savedStartIso == null) return;
+    if (savedStartIso == null) {
+      // --- 修改点：无任务时，内容为空 ---
+      flutterLocalNotificationsPlugin.show(
+        BackgroundTimerService.notificationId,
+        'Renormind',
+        '', // 内容留空
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            BackgroundTimerService.notificationChannelId,
+            'Renormind 计时器',
+            icon: '@mipmap/ic_launcher',
+            ongoing: true,
+            onlyAlertOnce: true,
+            showWhen: false,
+            visibility: NotificationVisibility.public,
+            category: AndroidNotificationCategory.service,
+          ),
+        ),
+      );
+      return;
+    }
 
     final startTime = DateTime.parse(savedStartIso);
     final now = DateTime.now();
@@ -104,27 +120,21 @@ void onServiceStart(ServiceInstance service) async {
     String content = "";
     bool shouldAlert = false;
 
-    // 判断当前是否处于预约阶段
     bool isInReservationPhase = now.isBefore(taskStartTime);
 
-    // 逻辑：如果上一秒还在预约阶段，这一秒不在了，且预约时长不为0 => 触发弹窗
     if (wasInReservationPhase && !isInReservationPhase && savedReserveMinutes > 0) {
       shouldAlert = true;
     }
-    // 更新状态
     wasInReservationPhase = isInReservationPhase;
 
     if (isInReservationPhase) {
-      // --- 预约阶段 ---
       final remaining = taskStartTime.difference(now).inSeconds;
       title = "预约倒计时";
       content = _formatHelper(remaining);
     } else {
-      // --- 任务阶段 ---
       final taskElapsedSeconds = now.difference(taskStartTime).inSeconds;
       
       if (plannedMinutes > 0) {
-        // [有计划时间] -> 显示倒计时 / 超时
         final int plannedSeconds = plannedMinutes * 60;
         final int remainingTaskTime = plannedSeconds - taskElapsedSeconds;
         
@@ -136,7 +146,6 @@ void onServiceStart(ServiceInstance service) async {
           content = "+${_formatHelper(-remainingTaskTime)}";
         }
       } else {
-        // [无计划时间 / -1] -> 显示正计时
         title = "任务进行中";
         content = "+${_formatHelper(taskElapsedSeconds)}";
       }
@@ -181,6 +190,13 @@ void onServiceStart(ServiceInstance service) async {
         ),
       );
     }
+  }
+
+  // 立即执行一次，消除延迟
+  await tick();
+
+  Timer.periodic(const Duration(seconds: 1), (timer) async {
+    await tick();
   });
 
   service.on('stop').listen((event) {
